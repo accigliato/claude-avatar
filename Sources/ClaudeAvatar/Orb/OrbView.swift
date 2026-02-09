@@ -162,11 +162,13 @@ final class OrbView: NSView {
             lifeAnimator?.stop()
         }
 
-        // Sleep mouth breathing
+        // Mouth animations: talking for responding, breathing for sleep
         faceLayer.stopTalking()
         faceLayer.stopMouthBreathing()
 
-        if state == .sleep {
+        if state == .responding {
+            faceLayer.startTalking()
+        } else if state == .sleep {
             faceLayer.startMouthBreathing()
         }
 
