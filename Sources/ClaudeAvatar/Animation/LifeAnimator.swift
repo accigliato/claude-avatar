@@ -6,6 +6,7 @@ final class LifeAnimator {
     private weak var faceLayer: FaceLayer?
     private weak var bodyLayer: CALayer?
     private weak var tentacleLayer: TentacleLayer?
+    private weak var effectLayer: EffectLayer?
     private weak var glowLayer: CALayer?
     private weak var avatarContainer: CALayer?
 
@@ -14,7 +15,7 @@ final class LifeAnimator {
     private var glanceTimer: DispatchSourceTimer?
     private var mouthTimer: DispatchSourceTimer?
     private var yawnTimer: DispatchSourceTimer?
-    private var orbitTimer: DispatchSourceTimer?
+    private var loaderTimer: DispatchSourceTimer?
     private var floatTimer: Timer?
 
     private var isRunning = false
@@ -46,10 +47,11 @@ final class LifeAnimator {
     var containerBasePosition: CGPoint = .zero
     var glowBasePosition: CGPoint = .zero
 
-    init(faceLayer: FaceLayer, bodyLayer: CALayer, tentacleLayer: TentacleLayer, glowLayer: CALayer, avatarContainer: CALayer) {
+    init(faceLayer: FaceLayer, bodyLayer: CALayer, tentacleLayer: TentacleLayer, effectLayer: EffectLayer, glowLayer: CALayer, avatarContainer: CALayer) {
         self.faceLayer = faceLayer
         self.bodyLayer = bodyLayer
         self.tentacleLayer = tentacleLayer
+        self.effectLayer = effectLayer
         self.glowLayer = glowLayer
         self.avatarContainer = avatarContainer
     }
@@ -79,11 +81,9 @@ final class LifeAnimator {
         mouthTimer = nil
         yawnTimer?.cancel()
         yawnTimer = nil
-        orbitTimer?.cancel()
-        orbitTimer = nil
+        loaderTimer?.cancel()
+        loaderTimer = nil
         // Keep float timer running for spin decay + smooth breathing wind-down
-        // Face/squint/orbit are already handled by setExpression + updateForState
-        // called before stop() in transitionTo() — no redundant animations here
     }
 
     func updateForState(_ state: AvatarState) {
@@ -93,26 +93,23 @@ final class LifeAnimator {
         targetBreathingPeriod = state.breathingDuration
         targetBodyBreathAmplitude = state.isAlive ? 0.02 : 0.0
 
-        // Orbit management
-        orbitTimer?.cancel()
-        orbitTimer = nil
+        // Effect + tentacle management
+        loaderTimer?.cancel()
+        loaderTimer = nil
 
         if state == .working {
-            // Continuous loader orbit
-            tentacleLayer?.startContinuousOrbit(speed: 2.5)
-            tentacleLayer?.setThinkingMode(false)
+            tentacleLayer?.retract()
+            effectLayer?.setMode(.loader, animated: true)
         } else if state == .thinking {
-            // Thought cloud: tentacles march above head
-            tentacleLayer?.stopOrbit()
-            tentacleLayer?.setThinkingMode(true)
+            tentacleLayer?.retract()
+            effectLayer?.setMode(.thinking, animated: true)
         } else if state == .responding {
-            // Occasional orbit
-            tentacleLayer?.stopOrbit()
-            tentacleLayer?.setThinkingMode(false)
-            scheduleNextOrbit()
+            tentacleLayer?.extend()
+            effectLayer?.setMode(.none, animated: true)
+            scheduleOccasionalLoader()
         } else {
-            tentacleLayer?.stopOrbit()
-            tentacleLayer?.setThinkingMode(false)
+            tentacleLayer?.extend()
+            effectLayer?.setMode(.none, animated: true)
         }
     }
 
@@ -122,23 +119,31 @@ final class LifeAnimator {
         totalSpinAccumulated += 8.0
     }
 
-    // MARK: - Tentacle Orbit (responding)
+    // MARK: - Occasional Loader (responding)
 
-    private func scheduleNextOrbit() {
+    private func scheduleOccasionalLoader() {
         guard isRunning, currentState == .responding else { return }
         let interval = Double.random(in: 8.0...15.0)
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(deadline: .now() + interval)
         timer.setEventHandler { [weak self] in
             guard let self = self, self.isRunning, self.currentState == .responding else { return }
+            // Retract tentacles, start loader
+            self.tentacleLayer?.retract()
+            self.effectLayer?.setMode(.loader, animated: true)
             self.faceLayer?.applySquint(0.4, animated: true)
-            self.tentacleLayer?.doSingleOrbit(speed: 2.5) { [weak self] in
-                self?.faceLayer?.applySquint(0, animated: true)
-                self?.scheduleNextOrbit()
+
+            // After ~2 seconds (roughly one full loop), stop and extend
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                guard let self = self, self.currentState == .responding else { return }
+                self.effectLayer?.setMode(.none, animated: true)
+                self.tentacleLayer?.extend()
+                self.faceLayer?.applySquint(0, animated: true)
+                self.scheduleOccasionalLoader()
             }
         }
-        orbitTimer?.cancel()
-        orbitTimer = timer
+        loaderTimer?.cancel()
+        loaderTimer = timer
         timer.resume()
     }
 
