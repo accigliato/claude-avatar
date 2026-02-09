@@ -168,10 +168,13 @@ final class TentacleLayer: CALayer {
         let w = bounds.width
         let h = bounds.height
 
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         for i in 0..<tentacleCount {
             let rect = normalTentacleRect(index: i, layerW: w, layerH: h)
             tentacles[i].path = CGPath(rect: rect, transform: nil)
         }
+        CATransaction.commit()
     }
 
     // MARK: - Normal position (below body, vertical, wiggling)
@@ -188,14 +191,17 @@ final class TentacleLayer: CALayer {
         let isOuter = (i == 0 || i == tentacleCount - 1)
         let ampMultiplier: CGFloat = isOuter ? 1.2 : 1.0
 
-        let offsetX = amplitude * ampMultiplier * sin(time * frequency * 2.0 * .pi + basePhase)
-        let offsetY = amplitude * ampMultiplier * 0.3 * sin(time * frequency * 2.0 * .pi * 0.7 + basePhase)
+        // Suppress wave during retract/extend (only flutter when fully out)
+        let rf = retractFactors[i]
+        let waveFactor = 1.0 - rf
 
-        let x = baseX + offsetX + dragDX * 0.4
-        let y = offsetY + dragDY * 0.3
+        let offsetX = amplitude * ampMultiplier * sin(time * frequency * 2.0 * .pi + basePhase) * waveFactor
+        let offsetY = amplitude * ampMultiplier * 0.3 * sin(time * frequency * 2.0 * .pi * 0.7 + basePhase) * waveFactor
+
+        let x = baseX + offsetX + dragDX * 0.4 * waveFactor
+        let y = offsetY + dragDY * 0.3 * waveFactor
 
         // Apply retract: scale height down and shift Y towards body (top of layer)
-        let rf = retractFactors[i]
         let actualHeight = tentacleHeight * (1 - rf)
         let actualY = y + tentacleHeight * rf  // retract upward (toward body)
 

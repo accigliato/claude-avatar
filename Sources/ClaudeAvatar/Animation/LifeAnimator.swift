@@ -21,8 +21,11 @@ final class LifeAnimator {
     private var isRunning = false
     private var currentState: AvatarState = .idle
 
-    // Float state
-    private var floatTime: CGFloat = 0
+    // Float state (phase accumulators avoid jump on freq change)
+    private var floatPhaseX: CGFloat = 0
+    private var floatPhaseY: CGFloat = 0.5  // initial offset for Lissajous
+    private var breathPhase: CGFloat = 0
+    private var bodyBreathPhase: CGFloat = 0
     private var floatRadius: CGFloat = 12
     private var floatPeriod: CGFloat = 8.0
     private var targetFloatRadius: CGFloat = 12
@@ -35,13 +38,6 @@ final class LifeAnimator {
     private var targetBreathingPeriod: CGFloat = 3.0
     private var bodyBreathAmplitude: CGFloat = 0.02
     private var targetBodyBreathAmplitude: CGFloat = 0.02
-
-    // Spin momentum
-    private var spinAngle: CGFloat = 0
-    private var spinVelocity: CGFloat = 0
-    private var totalSpinAccumulated: CGFloat = 0
-    private var isDizzy: Bool = false
-    private var dizzyTime: CGFloat = 0
 
     // Base positions (set during layout)
     var containerBasePosition: CGPoint = .zero
@@ -83,7 +79,7 @@ final class LifeAnimator {
         yawnTimer = nil
         loaderTimer?.cancel()
         loaderTimer = nil
-        // Keep float timer running for spin decay + smooth breathing wind-down
+        // Keep float timer running for smooth breathing wind-down
     }
 
     func updateForState(_ state: AvatarState) {
@@ -111,12 +107,6 @@ final class LifeAnimator {
             tentacleLayer?.extend()
             effectLayer?.setMode(.none, animated: true)
         }
-    }
-
-    /// Add rotational impulse on state transition
-    func addSpinImpulse() {
-        spinVelocity += 8.0
-        totalSpinAccumulated += 8.0
     }
 
     // MARK: - Occasional Loader (responding)
@@ -147,7 +137,7 @@ final class LifeAnimator {
         timer.resume()
     }
 
-    // MARK: - Floating (parallax) + Spin + Breathing
+    // MARK: - Floating (parallax) + Breathing
 
     private func startFloating() {
         guard floatTimer == nil else { return }
@@ -160,7 +150,6 @@ final class LifeAnimator {
 
     private func floatTick() {
         let dt: CGFloat = 0.016
-        floatTime += dt
 
         // Smooth interpolation towards target params
         let lerp: CGFloat = 0.03
@@ -169,70 +158,27 @@ final class LifeAnimator {
         breathingPeriod += (targetBreathingPeriod - breathingPeriod) * lerp
         bodyBreathAmplitude += (targetBodyBreathAmplitude - bodyBreathAmplitude) * lerp
 
+        // Phase accumulators: freq changes only affect rate, not current position
         let freq = 1.0 / max(floatPeriod, 0.1)
+        floatPhaseX += freq * dt * 2.0 * .pi
+        floatPhaseY += freq * dt * 2.0 * .pi * 0.7
 
         // Lissajous pattern for organic movement
-        let dx = floatRadius * sin(floatTime * freq * 2.0 * .pi)
-        let dy = floatRadius * sin(floatTime * freq * 2.0 * .pi * 0.7 + 0.5)
+        let dx = floatRadius * sin(floatPhaseX)
+        let dy = floatRadius * sin(floatPhaseY)
 
-        // --- Spin momentum ---
-        spinAngle += spinVelocity * dt
-        spinVelocity *= 0.97
-
-        // Dizzy wobble after fast spinning
-        if totalSpinAccumulated > 20 && abs(spinVelocity) < 1.0 && !isDizzy {
-            isDizzy = true
-            dizzyTime = 0
-            totalSpinAccumulated = 0
-        }
-
-        var dizzyAngle: CGFloat = 0
-        if isDizzy {
-            dizzyTime += dt
-            let wobbleDecay = exp(-dizzyTime * 1.2)
-            dizzyAngle = wobbleDecay * 0.15 * sin(dizzyTime * 5.0)
-            if wobbleDecay < 0.01 {
-                isDizzy = false
-            }
-        }
-
-        // Spring force: pull spinAngle back to nearest upright (multiple of 2π)
-        if abs(spinVelocity) < 2.0 && !isDizzy {
-            let twoPi = CGFloat.pi * 2.0
-            let nearestUpright = round(spinAngle / twoPi) * twoPi
-            let displacement = nearestUpright - spinAngle
-            let springK: CGFloat = 3.0
-            let damping: CGFloat = 0.92
-            spinVelocity += displacement * springK * dt
-            spinVelocity *= damping
-        }
-
-        if abs(spinVelocity) < 0.05 {
-            let twoPi = CGFloat.pi * 2.0
-            let nearestUpright = round(spinAngle / twoPi) * twoPi
-            if abs(spinAngle - nearestUpright) < 0.02 {
-                spinAngle = 0
-                spinVelocity = 0
-                if !isDizzy { totalSpinAccumulated = 0 }
-            }
-        }
-
-        let totalAngle = spinAngle + dizzyAngle
-
-        // --- Timer-based breathing (smooth, no CA animation snap) ---
+        // --- Timer-based breathing (phase accumulators) ---
         let glowBreathFreq = 1.0 / max(breathingPeriod, 0.1)
-        let glowBreathScale = 1.0 + 0.05 * sin(floatTime * glowBreathFreq * 2.0 * .pi)
-        let bodyBreathScale = 1.0 + bodyBreathAmplitude * sin(floatTime * 2.0 * .pi / 3.0)
+        breathPhase += glowBreathFreq * dt * 2.0 * .pi
+        bodyBreathPhase += dt * 2.0 * .pi / 3.0
+        let glowBreathScale = 1.0 + 0.05 * sin(breathPhase)
+        let bodyBreathScale = 1.0 + bodyBreathAmplitude * sin(bodyBreathPhase)
 
         // Move container (body+face+tentacles move together)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
 
-        var containerTransform = CATransform3DMakeTranslation(dx, dy, 0)
-        if abs(totalAngle) > 0.001 {
-            containerTransform = CATransform3DRotate(containerTransform, totalAngle, 0, 0, 1)
-        }
-        avatarContainer?.transform = containerTransform
+        avatarContainer?.transform = CATransform3DMakeTranslation(dx, dy, 0)
 
         // Glow: breathing scale + position follow with delay
         let glowLerp: CGFloat = 0.04

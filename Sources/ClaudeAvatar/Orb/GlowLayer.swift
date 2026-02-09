@@ -51,6 +51,10 @@ final class GlowLayer: CALayer {
         }
 
         glowGradient.colors = newColors
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         glowGradient.opacity = intensity
+        CATransaction.commit()
     }
 }
