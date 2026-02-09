@@ -22,24 +22,24 @@ final class TentacleLayer: CALayer {
     // Tentacle color
     private var tentacleColor: CGColor = AvatarState.idle.primaryColor.cgColor
 
-    // Orbit rotation around body center
+    // Orbit: per-tentacle position calculation (no layer transform)
     private var orbitAngle: CGFloat = 0
     private var orbitSpeed: CGFloat = 0
     private var targetOrbitSpeed: CGFloat = 0
+    private var orbitBlend: CGFloat = 0  // 0 = normal, 1 = fully orbiting
     private var singleOrbitTarget: CGFloat? = nil
     private var singleOrbitCompletion: (() -> Void)? = nil
 
     // Thinking mode: tentacles march above head on rectangular path
     private var isThinking: Bool = false
-    private var thinkingBlend: CGFloat = 0      // 0 = normal, 1 = fully thinking
-    private var thinkPathProgress: CGFloat = 0  // accumulated distance along perimeter
-    private var thinkStepAccum: CGFloat = 0     // accumulator for stepping
+    private var thinkingBlend: CGFloat = 0
+    private var thinkPathProgress: CGFloat = 0
+    private var thinkStepAccum: CGFloat = 0
 
     /// Y coordinate of the body center in this layer's coordinate space.
-    /// Set by OrbView during layout.
     var bodyCenterYOffset: CGFloat = 0
 
-    /// Body dimensions for thinking path calculation. Set by OrbView.
+    /// Body dimensions for orbit + thinking path. Set by OrbView.
     var bodyWidth: CGFloat = 0
     var bodyHeight: CGFloat = 0
 
@@ -138,7 +138,6 @@ final class TentacleLayer: CALayer {
         if enabled {
             thinkPathProgress = 0
             thinkStepAccum = 0
-            // Draw tentacles above face
             self.zPosition = 100
         } else {
             self.zPosition = 0
@@ -151,7 +150,7 @@ final class TentacleLayer: CALayer {
         let dt: CGFloat = 0.016
         time += dt
 
-        // Smoothly interpolate towards target parameters
+        // Smoothly interpolate wave parameters
         let lerp: CGFloat = 0.05
         frequency += (targetFrequency - frequency) * lerp
         amplitude += (targetAmplitude - amplitude) * lerp
@@ -160,30 +159,34 @@ final class TentacleLayer: CALayer {
         dragDX *= 0.95
         dragDY *= 0.95
 
+        // Update orbit angle
+        updateOrbitAngle(dt: dt)
+
+        // Blend towards orbit mode
+        let orbitBlendSpeed: CGFloat = 0.06
+        if targetOrbitSpeed > 0.01 || abs(orbitSpeed) > 0.1 {
+            orbitBlend += (1.0 - orbitBlend) * orbitBlendSpeed
+        } else {
+            orbitBlend += (0.0 - orbitBlend) * orbitBlendSpeed
+            if orbitBlend < 0.01 { orbitBlend = 0 }
+        }
+
         // Blend towards thinking mode
-        let blendSpeed: CGFloat = 0.06
+        let thinkBlendSpeed: CGFloat = 0.06
         if isThinking {
-            thinkingBlend += (1.0 - thinkingBlend) * blendSpeed
-            // Advance path progress in steps
+            thinkingBlend += (1.0 - thinkingBlend) * thinkBlendSpeed
             thinkStepAccum += dt
-            let stepInterval: CGFloat = 0.12  // step every 120ms
+            let stepInterval: CGFloat = 0.12
             if thinkStepAccum >= stepInterval {
                 thinkStepAccum -= stepInterval
-                thinkPathProgress += 5.0  // 5px per step
+                thinkPathProgress += 5.0
             }
         } else {
-            thinkingBlend += (0.0 - thinkingBlend) * blendSpeed
+            thinkingBlend += (0.0 - thinkingBlend) * thinkBlendSpeed
+            if thinkingBlend < 0.01 { thinkingBlend = 0 }
         }
 
         updateTentaclePaths()
-
-        // Only update orbit when not thinking
-        if thinkingBlend < 0.5 {
-            updateOrbit()
-        } else {
-            // Clear orbit transform when thinking
-            self.transform = CATransform3DIdentity
-        }
     }
 
     private func updateTentaclePaths() {
@@ -193,30 +196,36 @@ final class TentacleLayer: CALayer {
         let h = bounds.height
 
         for i in 0..<tentacleCount {
-            // Normal position
             let normalRect = normalTentacleRect(index: i, layerW: w, layerH: h)
+            var finalRect = normalRect
 
-            if thinkingBlend < 0.01 {
-                // Pure normal mode
-                tentacles[i].path = CGPath(rect: normalRect, transform: nil)
-            } else {
-                // Thinking position
-                let thinkRect = thinkingTentacleRect(index: i, layerW: w, layerH: h)
-
-                // Lerp between normal and thinking
-                let b = thinkingBlend
-                let blendedRect = CGRect(
-                    x: normalRect.origin.x + (thinkRect.origin.x - normalRect.origin.x) * b,
-                    y: normalRect.origin.y + (thinkRect.origin.y - normalRect.origin.y) * b,
-                    width: normalRect.width + (thinkRect.width - normalRect.width) * b,
-                    height: normalRect.height + (thinkRect.height - normalRect.height) * b
-                )
-                tentacles[i].path = CGPath(rect: blendedRect, transform: nil)
+            // Blend with orbit if active
+            if orbitBlend > 0.01 {
+                let orbitRect = orbitedTentacleRect(index: i, normalRect: normalRect, layerW: w, layerH: h)
+                finalRect = blendRects(finalRect, orbitRect, factor: orbitBlend)
             }
+
+            // Blend with thinking if active
+            if thinkingBlend > 0.01 {
+                let thinkRect = thinkingTentacleRect(index: i, layerW: w, layerH: h)
+                finalRect = blendRects(finalRect, thinkRect, factor: thinkingBlend)
+            }
+
+            tentacles[i].path = CGPath(rect: finalRect, transform: nil)
         }
     }
 
-    // Normal tentacle rect (below body, vertical, wiggling)
+    private func blendRects(_ a: CGRect, _ b: CGRect, factor f: CGFloat) -> CGRect {
+        return CGRect(
+            x: a.origin.x + (b.origin.x - a.origin.x) * f,
+            y: a.origin.y + (b.origin.y - a.origin.y) * f,
+            width: a.width + (b.width - a.width) * f,
+            height: a.height + (b.height - a.height) * f
+        )
+    }
+
+    // MARK: - Normal position (below body, vertical, wiggling)
+
     private func normalTentacleRect(index i: Int, layerW w: CGFloat, layerH h: CGFloat) -> CGRect {
         let tentacleWidth = w * 0.1
         let tentacleHeight = h * 0.7
@@ -238,37 +247,69 @@ final class TentacleLayer: CALayer {
         return CGRect(x: x, y: y, width: tentacleWidth, height: tentacleHeight)
     }
 
-    // Thinking tentacle rect (above body, horizontal, marching on rectangle path)
-    private func thinkingTentacleRect(index i: Int, layerW w: CGFloat, layerH h: CGFloat) -> CGRect {
-        let tentH = h * 0.7   // original tentacle height → becomes width when horizontal
-        let tentW = w * 0.1   // original tentacle width → becomes height when horizontal
+    // MARK: - Orbited position (per-tentacle, stable base, no layer transform)
 
-        // Rectangle path: half body size, centered above body
+    private let basePositions: [CGFloat] = [0.15, 0.28, 0.72, 0.85]
+
+    private func orbitedTentacleRect(index i: Int, normalRect: CGRect, layerW w: CGFloat, layerH h: CGFloat) -> CGRect {
+        let tentacleWidth = w * 0.1
+        let tentacleHeight = h * 0.7
+        let cx = w / 2.0
+        let cy = bodyCenterYOffset
+
+        // Use STABLE base positions (no wiggle) for orbit calculation
+        let baseX = w * basePositions[i]
+        let baseY = tentacleHeight / 2.0  // center of a tentacle at rest
+
+        let dx = baseX - cx
+        let dy = baseY - cy
+        let radius = sqrt(dx * dx + dy * dy)
+        let initialAngle = atan2(dy, dx)
+
+        // Orbited position
+        let newAngle = initialAngle + orbitAngle
+        let newCX = cx + radius * cos(newAngle)
+        let newCY = cy + radius * sin(newAngle)
+
+        // Add subtle wiggle on top of stable orbit
+        let t = CGFloat(i)
+        let basePhase = t * .pi / 2.0
+        let wiggleX = amplitude * 0.4 * sin(time * frequency * 2.0 * .pi + basePhase)
+        let wiggleY = amplitude * 0.15 * sin(time * frequency * 2.0 * .pi * 0.7 + basePhase)
+
+        return CGRect(
+            x: newCX - tentacleWidth / 2 + wiggleX,
+            y: newCY - tentacleHeight / 2 + wiggleY,
+            width: tentacleWidth,
+            height: tentacleHeight
+        )
+    }
+
+    // MARK: - Thinking position (above body, horizontal, marching on rectangle path)
+
+    private func thinkingTentacleRect(index i: Int, layerW w: CGFloat, layerH h: CGFloat) -> CGRect {
+        let tentH = h * 0.7
+        let tentW = w * 0.1
+
         let rectW = bodyWidth * 0.5
         let rectH = bodyHeight * 0.5
         let gap: CGFloat = 8.0
         let rectCenterX = w / 2.0
         let rectCenterY = bodyCenterYOffset + bodyHeight / 2.0 + gap + rectH / 2.0
 
-        // Perimeter of rectangle
         let perimeter = 2.0 * (rectW + rectH)
-
-        // Each tentacle evenly spaced around perimeter
         let spacing = perimeter / CGFloat(tentacleCount)
         let dist = (thinkPathProgress + CGFloat(i) * spacing).truncatingRemainder(dividingBy: perimeter)
 
-        // Convert distance to position on rectangle perimeter
         let (px, py) = pointOnRectPerimeter(
             dist: dist, perimeter: perimeter,
             rectW: rectW, rectH: rectH,
             centerX: rectCenterX, centerY: rectCenterY
         )
 
-        // Add subtle wobble
         let wobbleX = 0.5 * sin(time * 2.0 + CGFloat(i) * 1.5)
         let wobbleY = 0.3 * sin(time * 1.7 + CGFloat(i) * 1.2)
 
-        // Horizontal tentacle: width = tentH (long dimension), height = tentW (short)
         return CGRect(
             x: px - tentH / 2.0 + wobbleX,
             y: py - tentW / 2.0 + wobbleY,
@@ -277,7 +318,6 @@ final class TentacleLayer: CALayer {
         )
     }
 
-    /// Convert a distance along the rectangle perimeter to an (x,y) point
     private func pointOnRectPerimeter(
         dist: CGFloat, perimeter: CGFloat,
         rectW: CGFloat, rectH: CGFloat,
@@ -292,30 +332,23 @@ final class TentacleLayer: CALayer {
         if d < 0 { d += perimeter }
 
         if d < rectW {
-            // Bottom edge: left to right
             return (left + d, bottom)
         }
         d -= rectW
         if d < rectH {
-            // Right edge: bottom to top
             return (right, bottom + d)
         }
         d -= rectH
         if d < rectW {
-            // Top edge: right to left
             return (right - d, top)
         }
         d -= rectW
-        // Left edge: top to bottom
         return (left, top - d)
     }
 
-    // MARK: - Orbit
+    // MARK: - Orbit angle management
 
-    private func updateOrbit() {
-        let dt: CGFloat = 0.016
-
-        // Lerp orbit speed
+    private func updateOrbitAngle(dt: CGFloat) {
         let orbitLerp: CGFloat = 0.08
         orbitSpeed += (targetOrbitSpeed - orbitSpeed) * orbitLerp
 
@@ -330,30 +363,17 @@ final class TentacleLayer: CALayer {
 
         if abs(orbitSpeed) > 0.05 {
             orbitAngle += orbitSpeed * dt
-            applyOrbitTransform()
         } else if abs(targetOrbitSpeed) < 0.001 && abs(orbitAngle) > 0.01 {
-            // Spring back to nearest full rotation (= upright)
+            // Spring back to nearest full rotation
             let twoPi = CGFloat.pi * 2
             let nearest = round(orbitAngle / twoPi) * twoPi
             let displacement = nearest - orbitAngle
             if abs(displacement) > 0.02 {
                 orbitAngle += displacement * 0.08
-                applyOrbitTransform()
             } else {
                 orbitAngle = 0
                 orbitSpeed = 0
-                self.transform = CATransform3DIdentity
             }
         }
-    }
-
-    private func applyOrbitTransform() {
-        let pivotX = bounds.width / 2
-        let pivotY = bodyCenterYOffset
-        // Rotate around body center: translate to pivot, rotate, translate back
-        var t = CATransform3DMakeTranslation(pivotX, pivotY, 0)
-        t = CATransform3DRotate(t, orbitAngle, 0, 0, 1)
-        t = CATransform3DTranslate(t, -pivotX, -pivotY, 0)
-        self.transform = t
     }
 }
