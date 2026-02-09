@@ -21,6 +21,9 @@ final class LifeAnimator {
     private var isRunning = false
     private var currentState: AvatarState = .idle
 
+    // Blink clustering: track last double-blink to enforce cooldown
+    private var lastDoubleBlinkTime: CFAbsoluteTime = 0
+
     // Float state (phase accumulators avoid jump on freq change)
     private var floatPhaseX: CGFloat = 0
     private var floatPhaseY: CGFloat = 0.5  // initial offset for Lissajous
@@ -199,17 +202,51 @@ final class LifeAnimator {
         scheduleNextBlink()
     }
 
+    private func blinkInterval(for state: AvatarState) -> (min: Double, max: Double) {
+        switch state {
+        case .idle:                return (2.5, 5.0)
+        case .listening:           return (8.0, 15.0)
+        case .thinking:            return (3.5, 6.0)
+        case .working:             return (5.0, 8.0)
+        case .responding:          return (2.0, 4.0)
+        case .error:               return (1.5, 3.0)
+        case .success, .goodbye:   return (3.0, 5.0)
+        case .sleep:               return (6.0, 10.0)
+        }
+    }
+
     private func scheduleNextBlink() {
         guard isRunning else { return }
-        let interval = Double.random(in: 2.0...5.0)
+        let range = blinkInterval(for: currentState)
+        var interval = Double.random(in: range.min...range.max)
+
+        // Clustering cooldown: if a double-blink happened recently, add extra delay
+        let timeSinceDouble = CFAbsoluteTimeGetCurrent() - lastDoubleBlinkTime
+        if timeSinceDouble < 3.0 {
+            interval += (3.0 - timeSinceDouble)
+        }
+
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(deadline: .now() + interval)
         timer.setEventHandler { [weak self] in
             guard let self = self, self.isRunning else { return }
-            self.faceLayer?.blink {
+            self.faceLayer?.blink { [weak self] in
+                guard let self = self else { return }
+
+                // 20% chance of double-blink
                 if Double.random(in: 0...1) < 0.2 {
+                    self.lastDoubleBlinkTime = CFAbsoluteTimeGetCurrent()
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                         self.faceLayer?.blink(completion: nil)
+                    }
+                }
+
+                // 50% chance of post-blink microsaccade
+                if Double.random(in: 0...1) < 0.5 {
+                    let microDx = CGFloat.random(in: -0.15...0.15)
+                    let microDy = CGFloat.random(in: -0.1...0.1)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                        self.faceLayer?.applyEyeOffset(dx: microDx, dy: microDy, animated: true, duration: 0.15, easing: .easeOut)
                     }
                 }
             }
@@ -226,11 +263,24 @@ final class LifeAnimator {
         scheduleNextWander()
     }
 
+    private func wanderParams(for state: AvatarState) -> (interval: (Double, Double), range: CGFloat, biasX: CGFloat, biasY: CGFloat) {
+        switch state {
+        case .idle:       return ((1.5, 3.5), 0.8,  0,    0)
+        case .listening:  return ((3.0, 5.0), 0.4,  0,    0)     // centered, staring at user
+        case .thinking:   return ((2.0, 4.0), 0.6,  0.3,  0.4)   // bias upper-right (gaze aversion)
+        case .working:    return ((3.0, 5.0), 0.3,  0,    0)     // minimal, concentrated
+        case .responding: return ((0.8, 2.0), 0.8,  0,    0)     // reading pattern (handled specially)
+        case .error:      return ((0.5, 1.5), 1.0,  0,    0)     // erratic
+        case .success:    return ((1.5, 3.0), 0.5,  0,    0)
+        case .goodbye:    return ((3.0, 5.0), 0.3,  0,    0)
+        case .sleep:      return ((4.0, 8.0), 0.2,  0,    0)
+        }
+    }
+
     private func scheduleNextWander() {
         guard isRunning else { return }
-        let interval = currentState == .responding
-            ? Double.random(in: 0.8...2.0)
-            : Double.random(in: 1.5...3.5)
+        let params = wanderParams(for: currentState)
+        let interval = Double.random(in: params.interval.0...params.interval.1)
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(deadline: .now() + interval)
         timer.setEventHandler { [weak self] in
@@ -239,6 +289,7 @@ final class LifeAnimator {
             let dy: CGFloat
 
             if self.currentState == .responding {
+                // Reading pattern gestures
                 let gesture = Int.random(in: 0...4)
                 switch gesture {
                 case 0: dx = CGFloat.random(in: -1.5...(-0.5)); dy = CGFloat.random(in: 0.5...1.2)
@@ -247,8 +298,9 @@ final class LifeAnimator {
                 default: dx = CGFloat.random(in: -0.6...0.6); dy = CGFloat.random(in: -0.3...0.3)
                 }
             } else {
-                dx = CGFloat.random(in: -0.8...0.8)
-                dy = CGFloat.random(in: -0.5...0.5)
+                let r = params.range
+                dx = CGFloat.random(in: -r...r) + params.biasX
+                dy = CGFloat.random(in: -r * 0.6...r * 0.6) + params.biasY
             }
             self.faceLayer?.applyEyeOffset(dx: dx, dy: dy, animated: true)
 
@@ -275,58 +327,87 @@ final class LifeAnimator {
         scheduleNextGlance()
     }
 
+    private func glanceInterval(for state: AvatarState) -> (min: Double, max: Double) {
+        switch state {
+        case .listening:  return (10.0, 20.0)  // rare — focused on user
+        case .thinking:   return (4.0, 8.0)
+        case .error:      return (3.0, 6.0)
+        default:          return (5.0, 12.0)
+        }
+    }
+
     private func scheduleNextGlance() {
         guard isRunning else { return }
-        let interval = Double.random(in: 5.0...12.0)
+        let range = glanceInterval(for: currentState)
+        let interval = Double.random(in: range.min...range.max)
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(deadline: .now() + interval)
         timer.setEventHandler { [weak self] in
             guard let self = self, self.isRunning else { return }
-            let direction = Int.random(in: 0...3)
+
+            // Determine glance target
             var dx: CGFloat = 0
             var dy: CGFloat = 0
-            switch direction {
-            case 0: dx = CGFloat.random(in: 1.5...2.5)
-            case 1: dx = CGFloat.random(in: -2.5...(-1.5))
-            case 2: dy = CGFloat.random(in: 1.0...1.8)
-            case 3: dx = CGFloat.random(in: 1.0...2.0); dy = CGFloat.random(in: 0.5...1.2)
-            default: break
-            }
-            self.faceLayer?.applyEyeOffset(dx: dx, dy: dy, animated: true)
 
-            // Glance always triggers a mouth reaction
-            let magnitude = sqrt(dx * dx + dy * dy)
-            let roll = Double.random(in: 0...1)
-            let mouthOpenness: CGFloat
-            if roll < 0.5 {
-                // Open mouth, proportional to glance magnitude
-                mouthOpenness = CGFloat.random(in: 0.4...0.8) * min(magnitude / 2.5, 1.0)
-            } else if roll < 0.8 {
-                // Frown/pucker
-                mouthOpenness = CGFloat.random(in: -0.6...(-0.3))
+            if self.currentState == .thinking {
+                // Biased upward-right (reflective gaze aversion)
+                dx = CGFloat.random(in: 0.5...2.0)
+                dy = CGFloat.random(in: 0.8...1.8)
             } else {
-                // Big surprise
-                mouthOpenness = CGFloat.random(in: 0.8...1.0)
-            }
-            self.faceLayer?.applyMouthReaction(openness: mouthOpenness, animated: true)
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-                self?.tentacleLayer?.applyDrag(dx: dx * 0.7, dy: dy * 0.7)
-            }
-
-            let holdTime = Double.random(in: 0.8...2.0)
-            DispatchQueue.main.asyncAfter(deadline: .now() + holdTime) { [weak self] in
-                guard let self = self, self.isRunning else { return }
-                let returnDx = CGFloat.random(in: -0.3...0.3)
-                let returnDy = CGFloat.random(in: -0.2...0.2)
-                self.faceLayer?.applyEyeOffset(dx: returnDx, dy: returnDy, animated: true)
-                // Reset mouth reaction on return to neutral
-                self.faceLayer?.applyMouthReaction(openness: 0, animated: true)
-
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-                    self?.tentacleLayer?.applyDrag(dx: returnDx * 0.5, dy: returnDy * 0.5)
+                let direction = Int.random(in: 0...3)
+                switch direction {
+                case 0: dx = CGFloat.random(in: 1.5...2.5)
+                case 1: dx = CGFloat.random(in: -2.5...(-1.5))
+                case 2: dy = CGFloat.random(in: 1.0...1.8)
+                case 3: dx = CGFloat.random(in: 1.0...2.0); dy = CGFloat.random(in: 0.5...1.2)
+                default: break
                 }
             }
+
+            // Phase 1 — Anticipation: eyes move 0.3 gu in OPPOSITE direction (60ms)
+            let antiDx = -dx * 0.15  // ~0.3 gu for a 2.0 gu glance
+            let antiDy = -dy * 0.15
+            self.faceLayer?.applyEyeOffset(dx: antiDx, dy: antiDy, animated: true, duration: 0.06, easing: .easeOut)
+
+            // Phase 2 — Snap to target (250ms, easeOut)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) { [weak self] in
+                guard let self = self, self.isRunning else { return }
+                self.faceLayer?.applyEyeOffset(dx: dx, dy: dy, animated: true, duration: 0.25, easing: .easeOut)
+
+                // Mouth reaction
+                let magnitude = sqrt(dx * dx + dy * dy)
+                let roll = Double.random(in: 0...1)
+                let mouthOpenness: CGFloat
+                if roll < 0.5 {
+                    mouthOpenness = CGFloat.random(in: 0.4...0.8) * min(magnitude / 2.5, 1.0)
+                } else if roll < 0.8 {
+                    mouthOpenness = CGFloat.random(in: -0.6...(-0.3))
+                } else {
+                    mouthOpenness = CGFloat.random(in: 0.8...1.0)
+                }
+                self.faceLayer?.applyMouthReaction(openness: mouthOpenness, animated: true)
+
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                    self?.tentacleLayer?.applyDrag(dx: dx * 0.7, dy: dy * 0.7)
+                }
+
+                // Phase 3 — Hold
+                let holdTime = Double.random(in: 0.8...2.0)
+                DispatchQueue.main.asyncAfter(deadline: .now() + holdTime) { [weak self] in
+                    guard let self = self, self.isRunning else { return }
+
+                    // Phase 4 — Return (450ms, easeInEaseOut)
+                    let returnDx = CGFloat.random(in: -0.3...0.3)
+                    let returnDy = CGFloat.random(in: -0.2...0.2)
+                    self.faceLayer?.applyEyeOffset(dx: returnDx, dy: returnDy, animated: true, duration: 0.45, easing: .easeInEaseOut)
+                    self.faceLayer?.applyMouthReaction(openness: 0, animated: true)
+
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                        self?.tentacleLayer?.applyDrag(dx: returnDx * 0.5, dy: returnDy * 0.5)
+                    }
+                }
+            }
+
             self.scheduleNextGlance()
         }
         glanceTimer?.cancel()

@@ -95,7 +95,7 @@ final class FaceLayer: CALayer {
         }
     }
 
-    func applyEyeOffset(dx: CGFloat, dy: CGFloat, animated: Bool) {
+    func applyEyeOffset(dx: CGFloat, dy: CGFloat, animated: Bool, duration: CFTimeInterval = 0.6, easing: CAMediaTimingFunctionName = .easeInEaseOut) {
         eyeOffsetX = dx
         eyeOffsetY = dy
         mouthOffsetX = dx * 0.5
@@ -105,11 +105,11 @@ final class FaceLayer: CALayer {
         let mouthP = reactiveMouthPath(for: currentState)
 
         if animated {
-            animatePath(layer: leftEye, to: eyeP.left, duration: 0.6)
-            animatePath(layer: rightEye, to: eyeP.right, duration: 0.6)
-            animatePath(layer: leftEyeBorder, to: eyeP.left, duration: 0.6)
-            animatePath(layer: rightEyeBorder, to: eyeP.right, duration: 0.6)
-            animatePath(layer: mouth, to: mouthP, duration: 0.6)
+            animatePath(layer: leftEye, to: eyeP.left, duration: duration, easing: easing)
+            animatePath(layer: rightEye, to: eyeP.right, duration: duration, easing: easing)
+            animatePath(layer: leftEyeBorder, to: eyeP.left, duration: duration, easing: easing)
+            animatePath(layer: rightEyeBorder, to: eyeP.right, duration: duration, easing: easing)
+            animatePath(layer: mouth, to: mouthP, duration: duration, easing: easing)
         } else {
             leftEye.path = eyeP.left
             rightEye.path = eyeP.right
@@ -226,7 +226,7 @@ final class FaceLayer: CALayer {
 
     func startTalking() {
         guard talkTimer == nil else { return }
-        let timer = Timer(timeInterval: 0.35, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 0.15, repeats: true) { [weak self] _ in
             self?.talkTick()
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -246,7 +246,7 @@ final class FaceLayer: CALayer {
         talkPhase += 1
         let p = px
 
-        // Semi-random mouth variations to simulate speech
+        // Semi-random mouth variations to simulate speech (subtler at 150ms tick)
         let baseGW: CGFloat = 5.0
         let baseGH: CGFloat = 1.2
         let baseGX: CGFloat = 5.5
@@ -255,18 +255,18 @@ final class FaceLayer: CALayer {
         let widthVar: CGFloat
         let heightVar: CGFloat
 
-        // Every ~5 ticks, do an "emphasis" (bigger mouth)
-        if talkPhase % 5 == 0 {
-            widthVar = CGFloat.random(in: 0.5...1.5)
-            heightVar = CGFloat.random(in: 0.3...0.8)
-        } else if talkPhase % 3 == 0 {
+        // Every ~8 ticks, do an "emphasis" (bigger mouth)
+        if talkPhase % 8 == 0 {
+            widthVar = CGFloat.random(in: 0.3...0.8)
+            heightVar = CGFloat.random(in: 0.2...0.5)
+        } else if talkPhase % 5 == 0 {
             // Occasional brief pause (smaller mouth)
-            widthVar = CGFloat.random(in: -1.5...(-0.5))
-            heightVar = CGFloat.random(in: -0.4...(-0.1))
+            widthVar = CGFloat.random(in: -0.8...(-0.3))
+            heightVar = CGFloat.random(in: -0.3...(-0.1))
         } else {
             // Normal talking variation
-            widthVar = CGFloat.random(in: -0.8...0.8)
-            heightVar = CGFloat.random(in: -0.2...0.4)
+            widthVar = CGFloat.random(in: -0.5...0.5)
+            heightVar = CGFloat.random(in: -0.15...0.25)
         }
 
         let gw = baseGW + widthVar
@@ -275,39 +275,62 @@ final class FaceLayer: CALayer {
         let gy = baseGY + mouthOffsetY
 
         let path = CGPath(rect: CGRect(x: gx * p, y: gy * p, width: gw * p, height: gh * p), transform: nil)
-        animatePath(layer: mouth, to: path, duration: 0.25)
+        animatePath(layer: mouth, to: path, duration: 0.12)
     }
 
-    /// Yawn animation: mouth opens wide, eyes squint, then returns
+    /// Yawn animation with anticipation and follow-through
     func yawn(completion: (() -> Void)? = nil) {
         guard currentState == .idle else { completion?(); return }
         let p = px
 
-        // Phase 1: mouth opens wide, eyes half-close
-        let wideMouth = CGPath(rect: CGRect(x: 5.5 * p, y: 4.0 * p, width: 5.0 * p, height: 2.5 * p), transform: nil)
-        let squintLeft = closedEyePath(gx: leftEyeBaseX + eyeOffsetX, gy: eyeBaseY + eyeOffsetY + 0.3)
-        let squintRight = closedEyePath(gx: rightEyeBaseX + eyeOffsetX, gy: eyeBaseY + eyeOffsetY + 0.3)
+        // Phase 0 — Anticipation: mouth tightens before opening
+        let tightMouth = pixelRect(gx: 7.0 + mouthOffsetX, gy: 4.5 + mouthOffsetY, gw: 2.0, gh: 0.5)
+        animatePath(layer: mouth, to: tightMouth, duration: 0.15, easing: .easeOut)
 
-        animatePath(layer: mouth, to: wideMouth, duration: 0.5)
-        animatePath(layer: leftEye, to: squintLeft, duration: 0.4)
-        animatePath(layer: rightEye, to: squintRight, duration: 0.4)
-        animatePath(layer: leftEyeBorder, to: squintLeft, duration: 0.4)
-        animatePath(layer: rightEyeBorder, to: squintRight, duration: 0.4)
-
-        // Phase 2: hold the yawn
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+        // Phase 1: mouth opens wide, eyes half-close (after anticipation)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
             guard let self = self, self.currentState == .idle else { completion?(); return }
 
-            // Phase 3: close mouth, open eyes back
-            let baseMouth = self.mouthPath(for: self.currentState)
-            let eyes = self.eyePaths(for: self.currentState)
-            self.animatePath(layer: self.mouth, to: baseMouth, duration: 0.4)
-            self.animatePath(layer: self.leftEye, to: eyes.left, duration: 0.5)
-            self.animatePath(layer: self.rightEye, to: eyes.right, duration: 0.5)
-            self.animatePath(layer: self.leftEyeBorder, to: eyes.left, duration: 0.5)
-            self.animatePath(layer: self.rightEyeBorder, to: eyes.right, duration: 0.5)
+            let wideMouth = CGPath(rect: CGRect(x: 5.5 * p, y: 4.0 * p, width: 5.0 * p, height: 2.5 * p), transform: nil)
+            let squintLeft = self.closedEyePath(gx: self.leftEyeBaseX + self.eyeOffsetX, gy: self.eyeBaseY + self.eyeOffsetY + 0.3)
+            let squintRight = self.closedEyePath(gx: self.rightEyeBaseX + self.eyeOffsetX, gy: self.eyeBaseY + self.eyeOffsetY + 0.3)
 
-            completion?()
+            self.animatePath(layer: self.mouth, to: wideMouth, duration: 0.5)
+            self.animatePath(layer: self.leftEye, to: squintLeft, duration: 0.4)
+            self.animatePath(layer: self.rightEye, to: squintRight, duration: 0.4)
+            self.animatePath(layer: self.leftEyeBorder, to: squintLeft, duration: 0.4)
+            self.animatePath(layer: self.rightEyeBorder, to: squintRight, duration: 0.4)
+
+            // Phase 2: hold the yawn
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                guard let self = self, self.currentState == .idle else { completion?(); return }
+
+                // Phase 3: close mouth, open eyes back
+                let baseMouth = self.mouthPath(for: self.currentState)
+                let eyes = self.eyePaths(for: self.currentState)
+                self.animatePath(layer: self.mouth, to: baseMouth, duration: 0.4)
+                self.animatePath(layer: self.leftEye, to: eyes.left, duration: 0.5)
+                self.animatePath(layer: self.rightEye, to: eyes.right, duration: 0.5)
+                self.animatePath(layer: self.leftEyeBorder, to: eyes.left, duration: 0.5)
+                self.animatePath(layer: self.rightEyeBorder, to: eyes.right, duration: 0.5)
+
+                // Phase 4 — Follow-through: blink + sigh
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                    guard let self = self, self.currentState == .idle else { completion?(); return }
+                    // Post-yawn blink
+                    self.blink(completion: nil)
+                    // Small sigh — slight mouth opening
+                    let sighMouth = self.pixelRect(gx: 6.0 + self.mouthOffsetX, gy: 4.5 + self.mouthOffsetY, gw: 3.5, gh: 1.0)
+                    self.animatePath(layer: self.mouth, to: sighMouth, duration: 0.2)
+
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                        guard let self = self else { completion?(); return }
+                        let finalMouth = self.mouthPath(for: self.currentState)
+                        self.animatePath(layer: self.mouth, to: finalMouth, duration: 0.3)
+                        completion?()
+                    }
+                }
+            }
         }
     }
 
@@ -368,12 +391,12 @@ final class FaceLayer: CALayer {
         }
     }
 
-    private func animatePath(layer: CAShapeLayer, to path: CGPath, duration: CFTimeInterval = 0.3) {
+    private func animatePath(layer: CAShapeLayer, to path: CGPath, duration: CFTimeInterval = 0.3, easing: CAMediaTimingFunctionName = .easeInEaseOut) {
         let anim = CABasicAnimation(keyPath: "path")
         anim.fromValue = layer.path
         anim.toValue = path
         anim.duration = duration
-        anim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        anim.timingFunction = CAMediaTimingFunction(name: easing)
         layer.add(anim, forKey: "pathMorph")
         layer.path = path
     }
@@ -414,13 +437,15 @@ final class FaceLayer: CALayer {
             return EyePaths(left: left, right: right)
 
         case .listening:
-            let left = pixelRect(gx: 3.5 + ox, gy: 8.5 + oy, gw: 3, gh: 3.5 * sq)
-            let right = pixelRect(gx: 9.5 + ox, gy: 8.5 + oy, gw: 3, gh: 3.5 * sq)
+            // Convergent eyes — closer together for focused attention
+            let left = pixelRect(gx: 4.0 + ox, gy: 8.5 + oy, gw: 3, gh: 3.5 * sq)
+            let right = pixelRect(gx: 9.0 + ox, gy: 8.5 + oy, gw: 3, gh: 3.5 * sq)
             return EyePaths(left: left, right: right)
 
         case .thinking:
-            let left = pixelRect(gx: 5 + ox, gy: 10 + oy, gw: 2.5, gh: 3.0 * sq)
-            let right = pixelRect(gx: 10.5 + ox, gy: 10 + oy, gw: 2.5, gh: 3.0 * sq)
+            // Smaller + higher eyes — reflective gaze
+            let left = pixelRect(gx: 5 + ox, gy: 10.5 + oy, gw: 2.5, gh: 2.5 * sq)
+            let right = pixelRect(gx: 10.5 + ox, gy: 10.5 + oy, gw: 2.5, gh: 2.5 * sq)
             return EyePaths(left: left, right: right)
 
         case .working:
@@ -429,8 +454,10 @@ final class FaceLayer: CALayer {
             return EyePaths(left: left, right: right)
 
         case .responding:
-            let left = pixelRect(gx: leftEyeBaseX + ox, gy: eyeBaseY + oy, gw: 2.5, gh: 3.0 * sq)
-            let right = pixelRect(gx: rightEyeBaseX + ox, gy: eyeBaseY + oy, gw: 2.5, gh: 3.0 * sq)
+            // Slight leftward offset — reading/composing gaze
+            let rdx: CGFloat = -0.3
+            let left = pixelRect(gx: leftEyeBaseX + ox + rdx, gy: eyeBaseY + oy, gw: 2.5, gh: 3.0 * sq)
+            let right = pixelRect(gx: rightEyeBaseX + ox + rdx, gy: eyeBaseY + oy, gw: 2.5, gh: 3.0 * sq)
             return EyePaths(left: left, right: right)
 
         case .error:
@@ -487,15 +514,15 @@ final class FaceLayer: CALayer {
 
     private func mouthParams(for state: AvatarState) -> MouthParams {
         switch state {
-        case .idle:       return MouthParams(gx: 6.0, gy: 4.5, gw: 4.0, gh: 0.8)
-        case .listening:  return MouthParams(gx: 5.5, gy: 4.5, gw: 5.0, gh: 1.0)
-        case .thinking:   return MouthParams(gx: 7.0, gy: 4.5, gw: 2.0, gh: 0.6)
-        case .working:    return MouthParams(gx: 6.5, gy: 4.5, gw: 3.0, gh: 0.7)
+        case .idle:       return MouthParams(gx: 6.0, gy: 4.5, gw: 3.5, gh: 0.7)
+        case .listening:  return MouthParams(gx: 5.5, gy: 4.5, gw: 4.5, gh: 0.8)
+        case .thinking:   return MouthParams(gx: 7.2, gy: 4.5, gw: 2.0, gh: 0.6)  // asymmetric "hmm"
+        case .working:    return MouthParams(gx: 6.5, gy: 4.5, gw: 2.5, gh: 0.5)  // tight determination
         case .responding: return MouthParams(gx: 5.5, gy: 4.3, gw: 5.0, gh: 1.2)
-        case .error:      return MouthParams(gx: 6.5, gy: 4.5, gw: 3.0, gh: 1.5)
-        case .success:    return MouthParams(gx: 5.5, gy: 4.5, gw: 5.0, gh: 1.0)
-        case .goodbye:    return MouthParams(gx: 6.5, gy: 4.5, gw: 3.0, gh: 0.6)
-        case .sleep:      return MouthParams(gx: 6.5, gy: 4.5, gw: 3.0, gh: 0.8)
+        case .error:      return MouthParams(gx: 6.5, gy: 4.5, gw: 3.5, gh: 1.8)  // wider shock
+        case .success:    return MouthParams(gx: 5.5, gy: 4.5, gw: 5.5, gh: 0.7)  // wide flat smile
+        case .goodbye:    return MouthParams(gx: 6.5, gy: 4.5, gw: 2.5, gh: 0.5)
+        case .sleep:      return MouthParams(gx: 6.5, gy: 4.5, gw: 2.5, gh: 0.7)
         }
     }
 
