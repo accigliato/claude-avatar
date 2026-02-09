@@ -25,6 +25,9 @@ final class FaceLayer: CALayer {
     // Squint factor (0 = normal, 1 = fully closed)
     private var squintFactor: CGFloat = 0
 
+    // Mouth reaction: -1 = puckered/frown, 0 = neutral, +1 = wide open/surprised
+    private var mouthReactionOpenness: CGFloat = 0
+
     override init() {
         super.init()
         setup()
@@ -71,6 +74,7 @@ final class FaceLayer: CALayer {
         mouthOffsetX = 0
         mouthOffsetY = 0
         squintFactor = 0
+        mouthReactionOpenness = 0
         updateEyeBorderColor(for: state, animated: animated)
         applyExpression(animated: animated)
     }
@@ -98,7 +102,7 @@ final class FaceLayer: CALayer {
         mouthOffsetY = dy * 0.5
 
         let eyeP = eyePaths(for: currentState)
-        let mouthP = mouthPath(for: currentState)
+        let mouthP = reactiveMouthPath(for: currentState)
 
         if animated {
             animatePath(layer: leftEye, to: eyeP.left, duration: 0.6)
@@ -112,6 +116,16 @@ final class FaceLayer: CALayer {
             leftEyeBorder.path = eyeP.left
             rightEyeBorder.path = eyeP.right
             mouth.path = mouthP
+        }
+    }
+
+    func applyMouthReaction(openness: CGFloat, animated: Bool) {
+        mouthReactionOpenness = max(-1, min(1, openness))
+        let path = reactiveMouthPath(for: currentState)
+        if animated {
+            animatePath(layer: mouth, to: path, duration: 0.5)
+        } else {
+            mouth.path = path
         }
     }
 
@@ -488,5 +502,30 @@ final class FaceLayer: CALayer {
     private func mouthPath(for state: AvatarState) -> CGPath {
         let p = mouthParams(for: state)
         return pixelRect(gx: p.gx + mouthOffsetX, gy: p.gy + mouthOffsetY, gw: p.gw, gh: p.gh)
+    }
+
+    private func reactiveMouthPath(for state: AvatarState) -> CGPath {
+        let base = mouthParams(for: state)
+        let o = mouthReactionOpenness
+        let gw: CGFloat
+        let gh: CGFloat
+
+        if o > 0 {
+            // Open/surprised: taller and slightly wider
+            gh = base.gh + o * 1.8
+            gw = base.gw + o * 0.5
+        } else if o < 0 {
+            // Puckered/frown: shorter and narrower
+            gh = max(0.3, base.gh * (1.0 + o * 0.5))
+            gw = max(1.0, base.gw * (1.0 + o * 0.4))
+        } else {
+            gh = base.gh
+            gw = base.gw
+        }
+
+        // Re-center horizontally based on width change
+        let gx = base.gx + mouthOffsetX - (gw - base.gw) * 0.5
+        let gy = base.gy + mouthOffsetY
+        return pixelRect(gx: gx, gy: gy, gw: gw, gh: gh)
     }
 }

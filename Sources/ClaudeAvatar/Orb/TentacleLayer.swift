@@ -7,7 +7,7 @@ final class TentacleLayer: CALayer {
     private var tentacles: [CAShapeLayer] = []
 
     private var displayTimer: Timer?
-    private var time: CGFloat = 0
+    private var wavePhase: CGFloat = 0
 
     // Current wave parameters
     private var frequency: CGFloat = 1.0
@@ -115,6 +115,9 @@ final class TentacleLayer: CALayer {
 
     func extend() {
         cancelDelayTimers()
+        // Snap wave params to target so tentacles emerge with correct amplitude/frequency
+        frequency = targetFrequency
+        amplitude = targetAmplitude
         // Inner first (1, 2), then outer (0, 3)
         let order = [1, 2, 0, 3]
         for (seq, idx) in order.enumerated() {
@@ -140,10 +143,12 @@ final class TentacleLayer: CALayer {
 
     private func tick() {
         let dt: CGFloat = 0.016
-        time += dt
+
+        // Phase accumulator: frequency changes only affect rate, not current position
+        wavePhase += frequency * dt * 2.0 * .pi
 
         // Smoothly interpolate wave parameters
-        let lerp: CGFloat = 0.05
+        let lerp: CGFloat = 0.08
         frequency += (targetFrequency - frequency) * lerp
         amplitude += (targetAmplitude - amplitude) * lerp
 
@@ -191,12 +196,19 @@ final class TentacleLayer: CALayer {
         let isOuter = (i == 0 || i == tentacleCount - 1)
         let ampMultiplier: CGFloat = isOuter ? 1.2 : 1.0
 
-        // Suppress wave during retract/extend (only flutter when fully out)
+        // Dead zone + smooth ramp: wave stays at 0 while mostly retracted,
+        // then eases in once the tentacle is substantially visible (rf < 0.6)
         let rf = retractFactors[i]
-        let waveFactor = 1.0 - rf
+        let waveFactor: CGFloat
+        if rf > 0.6 {
+            waveFactor = 0
+        } else {
+            let t = (0.6 - rf) / 0.6  // linear 0→1 as rf goes 0.6→0
+            waveFactor = t * t * (3.0 - 2.0 * t)  // smoothstep
+        }
 
-        let offsetX = amplitude * ampMultiplier * sin(time * frequency * 2.0 * .pi + basePhase) * waveFactor
-        let offsetY = amplitude * ampMultiplier * 0.3 * sin(time * frequency * 2.0 * .pi * 0.7 + basePhase) * waveFactor
+        let offsetX = amplitude * ampMultiplier * sin(wavePhase + basePhase) * waveFactor
+        let offsetY = amplitude * ampMultiplier * 0.3 * sin(wavePhase * 0.7 + basePhase) * waveFactor
 
         let x = baseX + offsetX + dragDX * 0.4 * waveFactor
         let y = offsetY + dragDY * 0.3 * waveFactor

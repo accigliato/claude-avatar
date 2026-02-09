@@ -252,6 +252,12 @@ final class LifeAnimator {
             }
             self.faceLayer?.applyEyeOffset(dx: dx, dy: dy, animated: true)
 
+            // ~30% chance: small mouth reaction tied to wander movement
+            if Double.random(in: 0...1) < 0.3 {
+                let openness = CGFloat.random(in: -0.3...0.3)
+                self.faceLayer?.applyMouthReaction(openness: openness, animated: true)
+            }
+
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
                 self?.tentacleLayer?.applyDrag(dx: dx * 0.5, dy: dy * 0.5)
             }
@@ -288,6 +294,22 @@ final class LifeAnimator {
             }
             self.faceLayer?.applyEyeOffset(dx: dx, dy: dy, animated: true)
 
+            // Glance always triggers a mouth reaction
+            let magnitude = sqrt(dx * dx + dy * dy)
+            let roll = Double.random(in: 0...1)
+            let mouthOpenness: CGFloat
+            if roll < 0.5 {
+                // Open mouth, proportional to glance magnitude
+                mouthOpenness = CGFloat.random(in: 0.4...0.8) * min(magnitude / 2.5, 1.0)
+            } else if roll < 0.8 {
+                // Frown/pucker
+                mouthOpenness = CGFloat.random(in: -0.6...(-0.3))
+            } else {
+                // Big surprise
+                mouthOpenness = CGFloat.random(in: 0.8...1.0)
+            }
+            self.faceLayer?.applyMouthReaction(openness: mouthOpenness, animated: true)
+
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
                 self?.tentacleLayer?.applyDrag(dx: dx * 0.7, dy: dy * 0.7)
             }
@@ -298,6 +320,8 @@ final class LifeAnimator {
                 let returnDx = CGFloat.random(in: -0.3...0.3)
                 let returnDy = CGFloat.random(in: -0.2...0.2)
                 self.faceLayer?.applyEyeOffset(dx: returnDx, dy: returnDy, animated: true)
+                // Reset mouth reaction on return to neutral
+                self.faceLayer?.applyMouthReaction(openness: 0, animated: true)
 
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
                     self?.tentacleLayer?.applyDrag(dx: returnDx * 0.5, dy: returnDy * 0.5)
