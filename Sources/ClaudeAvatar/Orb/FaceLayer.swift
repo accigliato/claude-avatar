@@ -168,6 +168,9 @@ final class FaceLayer: CALayer {
     // MARK: - Mouth Breathing (sleep)
 
     func startMouthBreathing() {
+        // Remove any in-flight transition animation to avoid conflicts
+        mouth.removeAnimation(forKey: "pathMorph")
+
         let p = px
         let my = mouthBaseY + mouthOffsetY
         let mx = mouthOffsetX
@@ -183,7 +186,10 @@ final class FaceLayer: CALayer {
         let widePath = CGPath(rect: CGRect(x: wideGX * p, y: my * p, width: wideGW * p, height: gh * p), transform: nil)
         let narrowPath = CGPath(rect: CGRect(x: narrowGX * p, y: my * p, width: narrowGW * p, height: gh * p), transform: nil)
 
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         mouth.path = widePath
+        CATransaction.commit()
 
         let anim = CABasicAnimation(keyPath: "path")
         anim.fromValue = widePath
@@ -214,6 +220,7 @@ final class FaceLayer: CALayer {
     }
 
     func stopTalking() {
+        guard talkTimer != nil else { return }
         talkTimer?.invalidate()
         talkTimer = nil
         // Return mouth to base
