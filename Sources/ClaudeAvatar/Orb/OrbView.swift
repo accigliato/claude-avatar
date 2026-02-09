@@ -4,9 +4,10 @@ import QuartzCore
 final class OrbView: NSView {
 
     private let glowLayer = GlowLayer()
-    private let avatarContainer = CALayer()  // container for body+face+tentacles
+    private let avatarContainer = CALayer()  // container for body+face+tentacles+effects
     private let bodyLayer = CALayer()
     private let tentacleLayer = TentacleLayer()
+    private let effectLayer = EffectLayer()
     private let faceLayer = FaceLayer()
     private let animator = Animator()
     private var lifeAnimator: LifeAnimator?
@@ -33,7 +34,7 @@ final class OrbView: NSView {
         // Glow layer (outermost, on root)
         layer?.addSublayer(glowLayer)
 
-        // Avatar container (holds body, tentacles, face)
+        // Avatar container (holds body, tentacles, effects, face)
         layer?.addSublayer(avatarContainer)
 
         // Body layer: flat colored rectangle, sharp corners
@@ -43,6 +44,9 @@ final class OrbView: NSView {
         // Tentacle layer
         avatarContainer.addSublayer(tentacleLayer)
 
+        // Effect layer (above tentacles, below face)
+        avatarContainer.addSublayer(effectLayer)
+
         // Face layer (topmost)
         avatarContainer.addSublayer(faceLayer)
 
@@ -50,6 +54,7 @@ final class OrbView: NSView {
         layoutLayers()
         faceLayer.setExpression(.idle, animated: false)
         tentacleLayer.updateForState(.idle, animated: false)
+        effectLayer.updateColor(AvatarState.idle.primaryColor.cgColor, animated: false)
 
         // Breathing is now timer-based in LifeAnimator — no CA animation needed
 
@@ -58,6 +63,7 @@ final class OrbView: NSView {
             faceLayer: faceLayer,
             bodyLayer: bodyLayer,
             tentacleLayer: tentacleLayer,
+            effectLayer: effectLayer,
             glowLayer: glowLayer,
             avatarContainer: avatarContainer
         )
@@ -67,6 +73,9 @@ final class OrbView: NSView {
 
         // Start tentacle animation
         tentacleLayer.start()
+
+        // Start effect layer animation
+        effectLayer.start()
 
         // Start sleep timer
         resetSleepTimer()
@@ -104,10 +113,9 @@ final class OrbView: NSView {
         let tentacleHeight = bodyHeight * 0.3
         tentacleLayer.frame = CGRect(x: bodyOriginX, y: bodyOriginY - tentacleHeight, width: bodyWidth, height: tentacleHeight)
 
-        // Set body dimensions for orbit pivot + thinking path
-        tentacleLayer.bodyCenterYOffset = bodyHeight / 2 + tentacleHeight
-        tentacleLayer.bodyWidth = bodyWidth
-        tentacleLayer.bodyHeight = bodyHeight
+        // Effect layer: full container bounds, positions internally using bodyFrame
+        effectLayer.frame = b
+        effectLayer.bodyFrame = CGRect(x: bodyOriginX, y: bodyOriginY, width: bodyWidth, height: bodyHeight)
 
         // Face: same as body
         faceLayer.frame = bodyLayer.frame
@@ -141,7 +149,10 @@ final class OrbView: NSView {
         // Update tentacles
         tentacleLayer.updateForState(state, animated: true)
 
-        // Update float + spin + breathing params + orbit
+        // Update effect layer color
+        effectLayer.updateColor(state.primaryColor.cgColor, animated: true)
+
+        // Update float + spin + breathing params + effects
         lifeAnimator?.updateForState(state)
 
         // Life animations: start/stop based on state
@@ -219,6 +230,7 @@ final class OrbView: NSView {
         glowLayer.updateColor(AvatarState.idle.glowColor, intensity: AvatarState.idle.glowIntensity, animated: true)
         animateBodyColor(for: .idle)
         tentacleLayer.updateForState(.idle, animated: true)
+        effectLayer.updateColor(AvatarState.idle.primaryColor.cgColor, animated: true)
         lifeAnimator?.updateForState(.idle)
         lifeAnimator?.start()
 
