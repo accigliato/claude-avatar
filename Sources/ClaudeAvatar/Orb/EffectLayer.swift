@@ -31,9 +31,10 @@ final class EffectLayer: CALayer {
     private let dotCount = 4
     private var thinkTime: CGFloat = 0
 
-    // Fade
+    // Fade + retraction
     private var currentOpacity: CGFloat = 0
     private var targetOpacity: CGFloat = 0
+    private var retractingMode: EffectMode = .none
 
     override init() {
         super.init()
@@ -75,18 +76,22 @@ final class EffectLayer: CALayer {
 
     func setMode(_ newMode: EffectMode, animated: Bool) {
         guard newMode != mode else { return }
+        let previousMode = mode
         mode = newMode
 
         switch mode {
         case .none:
             targetOpacity = 0
+            retractingMode = previousMode
         case .loader:
             headPosition = 0
             stepAccum = 0
             targetOpacity = 1
+            retractingMode = .none
         case .thinking:
             thinkTime = 0
             targetOpacity = 1
+            retractingMode = .none
         }
 
         if !animated {
@@ -159,21 +164,32 @@ final class EffectLayer: CALayer {
         case .thinking:
             updateThinking(dt: dt)
         case .none:
-            break
+            // Continue updating positions during retraction (elements move toward body)
+            let retractFactor = 1.0 - currentOpacity
+            switch retractingMode {
+            case .loader:
+                updateLoader(dt: dt)
+                retractLoaderToBody(factor: retractFactor)
+            case .thinking:
+                updateThinking(dt: dt)
+                retractThinkingToBody(factor: retractFactor)
+            case .none:
+                break
+            }
         }
 
         CATransaction.commit()
     }
 
     private func applyOpacity() {
-        let loaderVisible = (mode == .loader || (mode == .none && currentOpacity > 0.01))
-        let thinkVisible = (mode == .thinking || (mode == .none && currentOpacity > 0.01))
+        let loaderVisible = mode == .loader || (mode == .none && retractingMode == .loader && currentOpacity > 0.01)
+        let thinkVisible = mode == .thinking || (mode == .none && retractingMode == .thinking && currentOpacity > 0.01)
 
         for tick in loaderTicks {
-            tick.opacity = loaderVisible && mode != .thinking ? Float(currentOpacity) : 0
+            tick.opacity = loaderVisible ? Float(currentOpacity) : 0
         }
         for dot in thinkDots {
-            dot.opacity = thinkVisible && mode != .loader ? Float(currentOpacity) : 0
+            dot.opacity = thinkVisible ? Float(currentOpacity) : 0
         }
     }
 
@@ -182,17 +198,18 @@ final class EffectLayer: CALayer {
     private func updateLoader(dt: CGFloat) {
         guard bodyFrame.width > 0 else { return }
 
-        let margin = bodyFrame.width * 0.25
+        let margin = bodyFrame.width * 0.30
         let rect = bodyFrame.insetBy(dx: -margin, dy: -margin)
         let perimeter = 2.0 * (rect.width + rect.height)
-        let tickSize = bodyFrame.width * 0.12
-        let gap: CGFloat = 10.0
+        let tickW = bodyFrame.width * 0.09
+        let tickH = tickW * 1.8
+        let gap: CGFloat = 25.0
 
         // 8-bit step accumulator
         stepAccum += dt
         if stepAccum >= stepInterval {
             let steps = floor(stepAccum / stepInterval)
-            headPosition += steps * tickSize
+            headPosition += steps * tickW
             stepAccum = stepAccum.truncatingRemainder(dividingBy: stepInterval)
         }
 
@@ -203,21 +220,25 @@ final class EffectLayer: CALayer {
 
         // Position each tick
         for i in 0..<tickCount {
-            var dist = headPosition - CGFloat(i) * (tickSize + gap)
+            var dist = headPosition - CGFloat(i) * (tickW + gap)
             if dist < 0 { dist += perimeter }
             dist = dist.truncatingRemainder(dividingBy: perimeter)
 
-            let (px, py) = pointOnRectPerimeter(
+            let (px, py, isHoriz) = pointOnRectPerimeter(
                 dist: dist, perimeter: perimeter,
                 rect: rect
             )
 
+            // Orient tick parallel to the edge it's on
+            let w = isHoriz ? tickH : tickW
+            let h = isHoriz ? tickW : tickH
+
             // Snap to integer pixels (8-bit feel)
-            let x = floor(px - tickSize / 2)
-            let y = floor(py - tickSize / 2)
+            let x = floor(px - w / 2)
+            let y = floor(py - h / 2)
 
             loaderTicks[i].path = CGPath(
-                rect: CGRect(x: x, y: y, width: tickSize, height: tickSize),
+                rect: CGRect(x: x, y: y, width: w, height: h),
                 transform: nil
             )
         }
@@ -238,7 +259,7 @@ final class EffectLayer: CALayer {
         let gap: CGFloat = 6.0
         let totalW = CGFloat(dotCount) * dotW + CGFloat(dotCount - 1) * gap
         let startX = bodyCenterX - totalW / 2
-        let baseY = bodyTop + 8.0
+        let baseY = bodyTop + 43.0
 
         // Sequential bounce: each dot bounces up in turn, wave-like
         let cyclePeriod: CGFloat = 1.6  // full cycle time
@@ -263,12 +284,61 @@ final class EffectLayer: CALayer {
         }
     }
 
+    // MARK: - Retraction (elements move toward body center)
+
+    private func retractLoaderToBody(factor: CGFloat) {
+        guard bodyFrame.width > 0 else { return }
+        let centerX = bodyFrame.midX
+        let centerY = bodyFrame.midY
+        let tickW = bodyFrame.width * 0.09
+        let tickH = tickW * 1.8
+        let shrink = 1.0 - factor  // shrink as they retract
+
+        for tick in loaderTicks {
+            guard let path = tick.path else { continue }
+            let tickRect = path.boundingBox
+            let currentX = tickRect.midX
+            let currentY = tickRect.midY
+            let newX = currentX + (centerX - currentX) * factor
+            let newY = currentY + (centerY - currentY) * factor
+            let newW = tickW * max(shrink, 0.1)
+            let newH = tickH * max(shrink, 0.1)
+            tick.path = CGPath(
+                rect: CGRect(x: floor(newX - newW / 2), y: floor(newY - newH / 2), width: newW, height: newH),
+                transform: nil
+            )
+        }
+    }
+
+    private func retractThinkingToBody(factor: CGFloat) {
+        guard bodyFrame.width > 0 else { return }
+        let targetY = bodyFrame.maxY
+        let centerX = bodyFrame.midX
+        let shrink = 1.0 - factor
+
+        for dot in thinkDots {
+            guard let path = dot.path else { continue }
+            let dotRect = path.boundingBox
+            let currentX = dotRect.midX
+            let currentY = dotRect.midY
+            let newX = currentX + (centerX - currentX) * factor
+            let newY = currentY + (targetY - currentY) * factor
+            let newW = dotRect.width * max(shrink, 0.1)
+            let newH = dotRect.height * max(shrink, 0.1)
+            dot.path = CGPath(
+                rect: CGRect(x: floor(newX - newW / 2), y: floor(newY - newH / 2), width: newW, height: newH),
+                transform: nil
+            )
+        }
+    }
+
     // MARK: - Perimeter point helper
 
+    /// Returns (x, y, isHorizontalEdge) for a point along the rect perimeter
     private func pointOnRectPerimeter(
         dist: CGFloat, perimeter: CGFloat,
         rect: CGRect
-    ) -> (CGFloat, CGFloat) {
+    ) -> (CGFloat, CGFloat, Bool) {
         let left = rect.minX
         let right = rect.maxX
         let bottom = rect.minY
@@ -277,25 +347,25 @@ final class EffectLayer: CALayer {
         var d = dist.truncatingRemainder(dividingBy: perimeter)
         if d < 0 { d += perimeter }
 
-        // Bottom edge: left to right
+        // Bottom edge: left to right (horizontal)
         if d < rect.width {
-            return (left + d, bottom)
+            return (left + d, bottom, true)
         }
         d -= rect.width
 
-        // Right edge: bottom to top
+        // Right edge: bottom to top (vertical)
         if d < rect.height {
-            return (right, bottom + d)
+            return (right, bottom + d, false)
         }
         d -= rect.height
 
-        // Top edge: right to left
+        // Top edge: right to left (horizontal)
         if d < rect.width {
-            return (right - d, top)
+            return (right - d, top, true)
         }
         d -= rect.width
 
-        // Left edge: top to bottom
-        return (left, top - d)
+        // Left edge: top to bottom (vertical)
+        return (left, top - d, false)
     }
 }

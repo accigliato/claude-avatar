@@ -170,11 +170,6 @@ final class OrbView: NSView {
             faceLayer.startMouthBreathing()
         }
 
-        // Spin impulse on active state transitions
-        if state != .idle && state != .sleep && state != .goodbye && previousState != .goodbye {
-            lifeAnimator?.addSpinImpulse()
-        }
-
         // State-specific animations
         animator.stopStateAnimation(on: self.layer!)
 
