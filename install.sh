@@ -29,7 +29,7 @@ if os.path.exists(settings_path):
         settings = json.load(f)
 
 hooks_config = {
-    "SessionStart": [{"hooks": [{"type": "command", "command": hook_path}]}],
+    "SessionStart": [{"hooks": [{"type": "command", "command": hook_path, "async": True}]}],
     "UserPromptSubmit": [{"hooks": [{"type": "command", "command": hook_path, "async": True}]}],
     "PreToolUse": [{"hooks": [{"type": "command", "command": hook_path, "async": True}]}],
     "PostToolUse": [{"hooks": [{"type": "command", "command": hook_path, "async": True}]}],
