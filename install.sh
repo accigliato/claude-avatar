@@ -6,10 +6,11 @@ cd "$(dirname "$0")"
 echo "Building ClaudeAvatar..."
 make build
 
-# Copy binary
+# Copy binary + font
 INSTALL_DIR="$HOME/.local/bin"
 mkdir -p "$INSTALL_DIR"
 cp .build/release/ClaudeAvatar "$INSTALL_DIR/"
+cp -f .build/release/sga-font.otf "$INSTALL_DIR/" 2>/dev/null || true
 echo "Binary installed to $INSTALL_DIR/ClaudeAvatar"
 
 # Make hook script executable
@@ -33,7 +34,10 @@ hooks_config = {
     "UserPromptSubmit": [{"hooks": [{"type": "command", "command": hook_path, "async": True}]}],
     "PreToolUse": [{"hooks": [{"type": "command", "command": hook_path, "async": True}]}],
     "PostToolUse": [{"hooks": [{"type": "command", "command": hook_path, "async": True}]}],
+    "PostToolUseFailure": [{"hooks": [{"type": "command", "command": hook_path, "async": True}]}],
     "Stop": [{"hooks": [{"type": "command", "command": hook_path, "async": True}]}],
+    "Notification": [{"hooks": [{"type": "command", "command": hook_path, "async": True}]}],
+    "PermissionRequest": [{"hooks": [{"type": "command", "command": hook_path, "async": True}]}],
     "SessionEnd": [{"hooks": [{"type": "command", "command": hook_path}]}]
 }
 

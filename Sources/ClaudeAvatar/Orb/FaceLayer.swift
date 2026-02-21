@@ -44,6 +44,7 @@ final class FaceLayer: CALayer {
 
     private func setup() {
         let borderColor = AvatarState.idle.primaryColor.cgColor
+
         // Borders behind eyes so fill covers inner stroke half → border appears external
         for border in [leftEyeBorder, rightEyeBorder] {
             border.fillColor = nil
@@ -65,7 +66,12 @@ final class FaceLayer: CALayer {
         super.layoutSublayers()
     }
 
+    // Current eye offset (for external elements that follow gaze)
+    var currentEyeOffsetX: CGFloat { eyeOffsetX }
+    var currentEyeOffsetY: CGFloat { eyeOffsetY }
+
     // MARK: - Public API
+
 
     func setExpression(_ state: AvatarState, animated: Bool) {
         currentState = state
@@ -93,6 +99,7 @@ final class FaceLayer: CALayer {
             leftEyeBorder.path = eyes.left
             rightEyeBorder.path = eyes.right
         }
+
     }
 
     func applyEyeOffset(dx: CGFloat, dy: CGFloat, animated: Bool, duration: CFTimeInterval = 0.6, easing: CAMediaTimingFunctionName = .easeInEaseOut) {
@@ -186,6 +193,7 @@ final class FaceLayer: CALayer {
         mouth.removeAnimation(forKey: "pathMorph")
 
         let p = px
+        let xo = xOff
         let my = mouthBaseY + mouthOffsetY
         let mx = mouthOffsetX
 
@@ -197,8 +205,8 @@ final class FaceLayer: CALayer {
         let wideGX = 6.5 + mx - (wideGW - 3.0) / 2.0
         let narrowGX = 6.5 + mx - (narrowGW - 3.0) / 2.0 + (wideGW - narrowGW) / 2.0
 
-        let widePath = CGPath(rect: CGRect(x: wideGX * p, y: my * p, width: wideGW * p, height: gh * p), transform: nil)
-        let narrowPath = CGPath(rect: CGRect(x: narrowGX * p, y: my * p, width: narrowGW * p, height: gh * p), transform: nil)
+        let widePath = CGPath(rect: CGRect(x: xo + wideGX * p, y: my * p, width: wideGW * p, height: gh * p), transform: nil)
+        let narrowPath = CGPath(rect: CGRect(x: xo + narrowGX * p, y: my * p, width: narrowGW * p, height: gh * p), transform: nil)
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -245,6 +253,7 @@ final class FaceLayer: CALayer {
     private func talkTick() {
         talkPhase += 1
         let p = px
+        let xo = xOff
 
         // Semi-random mouth variations to simulate speech (subtler at 150ms tick)
         let baseGW: CGFloat = 5.0
@@ -274,14 +283,13 @@ final class FaceLayer: CALayer {
         let gx = baseGX + mouthOffsetX - widthVar * 0.5
         let gy = baseGY + mouthOffsetY
 
-        let path = CGPath(rect: CGRect(x: gx * p, y: gy * p, width: gw * p, height: gh * p), transform: nil)
+        let path = CGPath(rect: CGRect(x: xo + gx * p, y: gy * p, width: gw * p, height: gh * p), transform: nil)
         animatePath(layer: mouth, to: path, duration: 0.12)
     }
 
     /// Yawn animation with anticipation and follow-through
     func yawn(completion: (() -> Void)? = nil) {
         guard currentState == .idle else { completion?(); return }
-        let p = px
 
         // Phase 0 — Anticipation: mouth tightens before opening
         let tightMouth = pixelRect(gx: 7.0 + mouthOffsetX, gy: 4.5 + mouthOffsetY, gw: 2.0, gh: 0.5)
@@ -291,7 +299,7 @@ final class FaceLayer: CALayer {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
             guard let self = self, self.currentState == .idle else { completion?(); return }
 
-            let wideMouth = CGPath(rect: CGRect(x: 5.5 * p, y: 4.0 * p, width: 5.0 * p, height: 2.5 * p), transform: nil)
+            let wideMouth = self.pixelRect(gx: 5.5, gy: 4.0, gw: 5.0, gh: 2.5)
             let squintLeft = self.closedEyePath(gx: self.leftEyeBaseX + self.eyeOffsetX, gy: self.eyeBaseY + self.eyeOffsetY + 0.3)
             let squintRight = self.closedEyePath(gx: self.rightEyeBaseX + self.eyeOffsetX, gy: self.eyeBaseY + self.eyeOffsetY + 0.3)
 
@@ -389,6 +397,7 @@ final class FaceLayer: CALayer {
             rightEyeBorder.path = eyes.right
             mouth.path = mouthP
         }
+
     }
 
     private func animatePath(layer: CAShapeLayer, to path: CGPath, duration: CFTimeInterval = 0.3, easing: CAMediaTimingFunctionName = .easeInEaseOut) {
@@ -403,18 +412,21 @@ final class FaceLayer: CALayer {
 
     // MARK: - Pixel grid helpers
 
-    private var px: CGFloat { bounds.width / 16.0 }
+    // Face grid: square pixels, oversized so eyes overflow above body (like original)
+    private var faceGridSize: CGFloat { min(bounds.width, bounds.height) * 1.5 }
+    private var px: CGFloat { faceGridSize / 16.0 }
+    private var xOff: CGFloat { (bounds.width - faceGridSize) / 2.0 }
 
     private func pixelRect(gx: CGFloat, gy: CGFloat, gw: CGFloat, gh: CGFloat) -> CGPath {
         let p = px
-        return CGPath(rect: CGRect(x: gx * p, y: gy * p, width: gw * p, height: gh * p), transform: nil)
+        return CGPath(rect: CGRect(x: xOff + gx * p, y: gy * p, width: gw * p, height: gh * p), transform: nil)
     }
 
     // MARK: - Base positions (grid coords, Y=0 is bottom)
     // Eyes in upper area (~gy 9), mouth in lower area (~gy 4.5)
 
-    private let leftEyeBaseX: CGFloat = 4
-    private let rightEyeBaseX: CGFloat = 9.5
+    private let leftEyeBaseX: CGFloat = 3.51
+    private let rightEyeBaseX: CGFloat = 9.99
     private let eyeBaseY: CGFloat = 9
     private let mouthBaseY: CGFloat = 4.5
 
@@ -438,14 +450,14 @@ final class FaceLayer: CALayer {
 
         case .listening:
             // Convergent eyes — closer together for focused attention
-            let left = pixelRect(gx: 4.0 + ox, gy: 8.5 + oy, gw: 3, gh: 3.5 * sq)
-            let right = pixelRect(gx: 9.0 + ox, gy: 8.5 + oy, gw: 3, gh: 3.5 * sq)
+            let left = pixelRect(gx: 3.51 + ox, gy: 8.5 + oy, gw: 3, gh: 3.5 * sq)
+            let right = pixelRect(gx: 9.49 + ox, gy: 8.5 + oy, gw: 3, gh: 3.5 * sq)
             return EyePaths(left: left, right: right)
 
         case .thinking:
             // Smaller + higher eyes — reflective gaze
-            let left = pixelRect(gx: 5 + ox, gy: 10.5 + oy, gw: 2.5, gh: 2.5 * sq)
-            let right = pixelRect(gx: 10.5 + ox, gy: 10.5 + oy, gw: 2.5, gh: 2.5 * sq)
+            let left = pixelRect(gx: 4.51 + ox, gy: 10.5 + oy, gw: 2.5, gh: 2.5 * sq)
+            let right = pixelRect(gx: 10.99 + ox, gy: 10.5 + oy, gw: 2.5, gh: 2.5 * sq)
             return EyePaths(left: left, right: right)
 
         case .working:
@@ -460,14 +472,26 @@ final class FaceLayer: CALayer {
             let right = pixelRect(gx: rightEyeBaseX + ox + rdx, gy: eyeBaseY + oy, gw: 2.5, gh: 3.0 * sq)
             return EyePaths(left: left, right: right)
 
+        case .tool:
+            // Slightly narrowed focused eyes — determined, cooking face
+            let left = pixelRect(gx: 4.01 + ox, gy: 9.5 + oy, gw: 2.5, gh: 2.5 * sq)
+            let right = pixelRect(gx: 10.49 + ox, gy: 9.5 + oy, gw: 2.5, gh: 2.5 * sq)
+            return EyePaths(left: left, right: right)
+
+        case .approve:
+            // Wide alert eyes — waiting, attentive
+            let left = pixelRect(gx: 3.01 + ox, gy: 8.5 + oy, gw: 3.0, gh: 4.0 * sq)
+            let right = pixelRect(gx: 9.99 + ox, gy: 8.5 + oy, gw: 3.0, gh: 4.0 * sq)
+            return EyePaths(left: left, right: right)
+
         case .error:
-            let left = xEyePath(cx: 5.25 + ox, cy: 10.25 + oy)
-            let right = xEyePath(cx: 10.75 + ox, cy: 10.25 + oy)
+            let left = xEyePath(cx: 4.76 + ox, cy: 10.25 + oy)
+            let right = xEyePath(cx: 11.24 + ox, cy: 10.25 + oy)
             return EyePaths(left: left, right: right)
 
         case .success:
-            let left = happyEyePath(cx: 5.25 + ox, cy: 10 + oy)
-            let right = happyEyePath(cx: 10.75 + ox, cy: 10 + oy)
+            let left = happyEyePath(cx: 4.76 + ox, cy: 10 + oy)
+            let right = happyEyePath(cx: 11.24 + ox, cy: 10 + oy)
             return EyePaths(left: left, right: right)
 
         case .goodbye, .sleep:
@@ -483,23 +507,25 @@ final class FaceLayer: CALayer {
 
     private func xEyePath(cx: CGFloat, cy: CGFloat) -> CGPath {
         let p = px
+        let xo = xOff
         let path = CGMutablePath()
-        path.addRect(CGRect(x: (cx - 1.2) * p, y: (cy - 1.2) * p, width: 0.7 * p, height: 0.7 * p))
-        path.addRect(CGRect(x: (cx - 0.35) * p, y: (cy - 0.35) * p, width: 0.7 * p, height: 0.7 * p))
-        path.addRect(CGRect(x: (cx + 0.5) * p, y: (cy + 0.5) * p, width: 0.7 * p, height: 0.7 * p))
-        path.addRect(CGRect(x: (cx + 0.5) * p, y: (cy - 1.2) * p, width: 0.7 * p, height: 0.7 * p))
-        path.addRect(CGRect(x: (cx - 1.2) * p, y: (cy + 0.5) * p, width: 0.7 * p, height: 0.7 * p))
+        path.addRect(CGRect(x: xo + (cx - 1.2) * p, y: (cy - 1.2) * p, width: 0.7 * p, height: 0.7 * p))
+        path.addRect(CGRect(x: xo + (cx - 0.35) * p, y: (cy - 0.35) * p, width: 0.7 * p, height: 0.7 * p))
+        path.addRect(CGRect(x: xo + (cx + 0.5) * p, y: (cy + 0.5) * p, width: 0.7 * p, height: 0.7 * p))
+        path.addRect(CGRect(x: xo + (cx + 0.5) * p, y: (cy - 1.2) * p, width: 0.7 * p, height: 0.7 * p))
+        path.addRect(CGRect(x: xo + (cx - 1.2) * p, y: (cy + 0.5) * p, width: 0.7 * p, height: 0.7 * p))
         return path
     }
 
     private func happyEyePath(cx: CGFloat, cy: CGFloat) -> CGPath {
         let p = px
+        let xo = xOff
         let path = CGMutablePath()
-        path.addRect(CGRect(x: (cx - 1.2) * p, y: (cy + 0.5) * p, width: 0.7 * p, height: 0.7 * p))
-        path.addRect(CGRect(x: (cx - 0.5) * p, y: (cy - 0.2) * p, width: 0.7 * p, height: 0.7 * p))
-        path.addRect(CGRect(x: (cx + 0.2) * p, y: (cy - 0.8) * p, width: 0.7 * p, height: 0.7 * p))
-        path.addRect(CGRect(x: (cx + 0.9) * p, y: (cy - 0.2) * p, width: 0.7 * p, height: 0.7 * p))
-        path.addRect(CGRect(x: (cx + 1.6) * p, y: (cy + 0.5) * p, width: 0.7 * p, height: 0.7 * p))
+        path.addRect(CGRect(x: xo + (cx - 1.2) * p, y: (cy + 0.5) * p, width: 0.7 * p, height: 0.7 * p))
+        path.addRect(CGRect(x: xo + (cx - 0.5) * p, y: (cy - 0.2) * p, width: 0.7 * p, height: 0.7 * p))
+        path.addRect(CGRect(x: xo + (cx + 0.2) * p, y: (cy - 0.8) * p, width: 0.7 * p, height: 0.7 * p))
+        path.addRect(CGRect(x: xo + (cx + 0.9) * p, y: (cy - 0.2) * p, width: 0.7 * p, height: 0.7 * p))
+        path.addRect(CGRect(x: xo + (cx + 1.6) * p, y: (cy + 0.5) * p, width: 0.7 * p, height: 0.7 * p))
         return path
     }
 
@@ -519,6 +545,8 @@ final class FaceLayer: CALayer {
         case .thinking:   return MouthParams(gx: 7.2, gy: 4.5, gw: 2.0, gh: 0.6)  // asymmetric "hmm"
         case .working:    return MouthParams(gx: 6.5, gy: 4.5, gw: 2.5, gh: 0.5)  // tight determination
         case .responding: return MouthParams(gx: 5.5, gy: 4.3, gw: 5.0, gh: 1.2)
+        case .tool:       return MouthParams(gx: 6.5, gy: 5.5, gw: 3.0, gh: 0.6)  // slight grin, above apron
+        case .approve:    return MouthParams(gx: 6.0, gy: 4.3, gw: 4.0, gh: 1.2)  // slightly open, attentive
         case .error:      return MouthParams(gx: 6.5, gy: 4.5, gw: 3.5, gh: 1.8)  // wider shock
         case .success:    return MouthParams(gx: 5.5, gy: 4.5, gw: 5.5, gh: 0.7)  // wide flat smile
         case .goodbye:    return MouthParams(gx: 6.5, gy: 4.5, gw: 2.5, gh: 0.5)

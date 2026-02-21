@@ -7,6 +7,7 @@ final class LifeAnimator {
     private weak var bodyLayer: CALayer?
     private weak var tentacleLayer: TentacleLayer?
     private weak var effectLayer: EffectLayer?
+    private weak var cookingLayer: CookingLayer?
     private weak var glowLayer: CALayer?
     private weak var avatarContainer: CALayer?
 
@@ -46,11 +47,12 @@ final class LifeAnimator {
     var containerBasePosition: CGPoint = .zero
     var glowBasePosition: CGPoint = .zero
 
-    init(faceLayer: FaceLayer, bodyLayer: CALayer, tentacleLayer: TentacleLayer, effectLayer: EffectLayer, glowLayer: CALayer, avatarContainer: CALayer) {
+    init(faceLayer: FaceLayer, bodyLayer: CALayer, tentacleLayer: TentacleLayer, effectLayer: EffectLayer, cookingLayer: CookingLayer, glowLayer: CALayer, avatarContainer: CALayer) {
         self.faceLayer = faceLayer
         self.bodyLayer = bodyLayer
         self.tentacleLayer = tentacleLayer
         self.effectLayer = effectLayer
+        self.cookingLayer = cookingLayer
         self.glowLayer = glowLayer
         self.avatarContainer = avatarContainer
     }
@@ -90,18 +92,26 @@ final class LifeAnimator {
         targetFloatRadius = state.floatRadius
         targetFloatPeriod = state.floatPeriod
         targetBreathingPeriod = state.breathingDuration
-        targetBodyBreathAmplitude = state.isAlive ? 0.02 : 0.0
+        targetBodyBreathAmplitude = (state.isAlive && state != .tool) ? 0.02 : 0.0
 
         // Effect + tentacle management
         loaderTimer?.cancel()
         loaderTimer = nil
 
-        if state == .working {
+        if state == .tool {
+            // Tool state: retract tentacles, hide effects (CookingLayer handles visuals)
+            tentacleLayer?.retract()
+            effectLayer?.setMode(.none, animated: true)
+        } else if state == .working {
             tentacleLayer?.retract()
             effectLayer?.setMode(.loader, animated: true)
         } else if state == .thinking {
             tentacleLayer?.retract()
             effectLayer?.setMode(.thinking, animated: true)
+        } else if state == .approve {
+            // Approve: extend tentacles, no effects, alert scanning
+            tentacleLayer?.extend()
+            effectLayer?.setMode(.none, animated: true)
         } else if state == .responding {
             tentacleLayer?.extend()
             effectLayer?.setMode(.none, animated: true)
@@ -193,6 +203,17 @@ final class LifeAnimator {
         // Body: breathing scale
         bodyLayer?.transform = CATransform3DMakeScale(bodyBreathScale, bodyBreathScale, 1)
 
+        // Cooking layer: breathing scale synced with body (scale around body center)
+        if let body = bodyLayer, let cooking = cookingLayer {
+            let offX = body.position.x - cooking.position.x
+            let offY = body.position.y - cooking.position.y
+            let s = bodyBreathScale
+            var ct = CATransform3DIdentity
+            ct = CATransform3DScale(ct, s, s, 1)
+            ct = CATransform3DTranslate(ct, offX * (1 - s), offY * (1 - s), 0)
+            cooking.transform = ct
+        }
+
         CATransaction.commit()
     }
 
@@ -209,6 +230,8 @@ final class LifeAnimator {
         case .thinking:            return (3.5, 6.0)
         case .working:             return (5.0, 8.0)
         case .responding:          return (2.0, 4.0)
+        case .tool:                return (4.0, 7.0)
+        case .approve:             return (2.0, 4.0)
         case .error:               return (1.5, 3.0)
         case .success, .goodbye:   return (3.0, 5.0)
         case .sleep:               return (6.0, 10.0)
@@ -267,9 +290,11 @@ final class LifeAnimator {
         switch state {
         case .idle:       return ((1.5, 3.5), 0.8,  0,    0)
         case .listening:  return ((3.0, 5.0), 0.4,  0,    0)     // centered, staring at user
-        case .thinking:   return ((2.0, 4.0), 0.6,  0.3,  0.4)   // bias upper-right (gaze aversion)
+        case .thinking:   return ((2.0, 4.0), 0.6,  0,    0)     // no bias — looks all around
         case .working:    return ((3.0, 5.0), 0.3,  0,    0)     // minimal, concentrated
         case .responding: return ((0.8, 2.0), 0.8,  0,    0)     // reading pattern (handled specially)
+        case .tool:       return ((2.0, 4.0), 0.4,  -0.2, -0.1)  // focused down-left (watching pan)
+        case .approve:    return ((1.0, 2.5), 0.9,  0,    0)     // alert scanning
         case .error:      return ((0.5, 1.5), 1.0,  0,    0)     // erratic
         case .success:    return ((1.5, 3.0), 0.5,  0,    0)
         case .goodbye:    return ((3.0, 5.0), 0.3,  0,    0)
@@ -331,6 +356,8 @@ final class LifeAnimator {
         switch state {
         case .listening:  return (10.0, 20.0)  // rare — focused on user
         case .thinking:   return (4.0, 8.0)
+        case .tool:       return (6.0, 12.0)   // occasional glances while cooking
+        case .approve:    return (3.0, 6.0)    // alert, looking around
         case .error:      return (3.0, 6.0)
         default:          return (5.0, 12.0)
         }
@@ -350,9 +377,24 @@ final class LifeAnimator {
             var dy: CGFloat = 0
 
             if self.currentState == .thinking {
-                // Biased upward-right (reflective gaze aversion)
-                dx = CGFloat.random(in: 0.5...2.0)
-                dy = CGFloat.random(in: 0.8...1.8)
+                // Reflective gaze — looks in all directions
+                let direction = Int.random(in: 0...3)
+                switch direction {
+                case 0: dx = CGFloat.random(in: 0.5...2.0); dy = CGFloat.random(in: 0.8...1.8)     // upper-right
+                case 1: dx = CGFloat.random(in: -2.0...(-0.5)); dy = CGFloat.random(in: 0.8...1.8)  // upper-left
+                case 2: dx = CGFloat.random(in: -2.0...(-0.5)); dy = CGFloat.random(in: -0.5...0.5)  // left
+                default: dx = CGFloat.random(in: 0.5...2.0); dy = CGFloat.random(in: -0.5...0.5)     // right
+                }
+            } else if self.currentState == .approve {
+                // Alert scanning — look around in all directions
+                let direction = Int.random(in: 0...5)
+                switch direction {
+                case 0: dx = CGFloat.random(in: 1.5...2.5); dy = CGFloat.random(in: 0.5...1.0)
+                case 1: dx = CGFloat.random(in: -2.5...(-1.5)); dy = CGFloat.random(in: 0.5...1.0)
+                case 2: dy = CGFloat.random(in: 1.0...2.0)
+                case 3: dx = CGFloat.random(in: -1.0...1.0); dy = CGFloat.random(in: -1.0...(-0.5))
+                default: dx = CGFloat.random(in: 1.0...2.0); dy = CGFloat.random(in: 0.5...1.2)
+                }
             } else {
                 let direction = Int.random(in: 0...3)
                 switch direction {

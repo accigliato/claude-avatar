@@ -6,6 +6,8 @@ enum AvatarState: String, CaseIterable {
     case thinking
     case working
     case responding
+    case tool       // executing a tool ("let me cook")
+    case approve    // awaiting permission approval
     case error
     case success
     case goodbye
@@ -13,15 +15,17 @@ enum AvatarState: String, CaseIterable {
 
     var primaryColor: NSColor {
         switch self {
-        case .idle:       return NSColor(red: 0.76, green: 0.52, blue: 0.39, alpha: 1.0) // Terracotta
-        case .listening:  return NSColor(red: 0.65, green: 0.80, blue: 0.96, alpha: 1.0) // Pastel blue
-        case .thinking:   return NSColor(red: 0.78, green: 0.65, blue: 0.96, alpha: 1.0) // Pastel purple
-        case .working:    return NSColor(red: 0.96, green: 0.82, blue: 0.55, alpha: 1.0) // Pastel amber
-        case .responding: return NSColor(red: 0.55, green: 0.92, blue: 0.78, alpha: 1.0) // Pastel mint
-        case .error:      return NSColor(red: 0.96, green: 0.55, blue: 0.55, alpha: 1.0) // Pastel coral
-        case .success:    return NSColor(red: 0.78, green: 0.96, blue: 0.55, alpha: 1.0) // Pastel lime
-        case .goodbye:    return NSColor(red: 0.55, green: 0.48, blue: 0.70, alpha: 1.0) // Muted purple
-        case .sleep:      return NSColor(red: 0.45, green: 0.42, blue: 0.52, alpha: 1.0) // Dark grey-purple
+        case .idle:       return NSColor(red: 1.00, green: 0.478, blue: 0.302, alpha: 1.0) // #FF7A4D base orange
+        case .listening:  return NSColor(red: 0.302, green: 0.659, blue: 1.00, alpha: 1.0)  // #4DA8FF soft blue
+        case .thinking:   return NSColor(red: 0.627, green: 0.478, blue: 1.00, alpha: 1.0)  // #A07AFF soft purple
+        case .working:    return NSColor(red: 1.00, green: 0.706, blue: 0.302, alpha: 1.0)  // #FFB44D warm amber
+        case .responding: return NSColor(red: 0.302, green: 1.00, blue: 0.706, alpha: 1.0)  // #4DFFB4 soft mint
+        case .tool:       return NSColor(red: 1.00, green: 0.353, blue: 0.176, alpha: 1.0)  // #FF5A2D intense orange
+        case .approve:    return NSColor(red: 1.00, green: 0.831, blue: 0.302, alpha: 1.0)  // #FFD44D attention yellow
+        case .error:      return NSColor(red: 1.00, green: 0.302, blue: 0.416, alpha: 1.0)  // #FF4D6A soft coral
+        case .success:    return NSColor(red: 0.478, green: 1.00, blue: 0.302, alpha: 1.0)  // #7AFF4D bright lime
+        case .goodbye:    return NSColor(red: 0.549, green: 0.416, blue: 0.478, alpha: 1.0) // #8C6A7A muted mauve
+        case .sleep:      return NSColor(red: 0.239, green: 0.165, blue: 0.149, alpha: 1.0) // #3D2A26 dark dusk
         }
     }
 
@@ -36,6 +40,8 @@ enum AvatarState: String, CaseIterable {
         case .thinking:   return 1.5
         case .working:    return 1.0
         case .responding: return 2.0
+        case .tool:       return 1.0
+        case .approve:    return 2.0
         case .error:      return 1.5
         case .success:    return 1.5
         case .goodbye:    return 4.0
@@ -50,6 +56,8 @@ enum AvatarState: String, CaseIterable {
         case .thinking:   return 0.7
         case .working:    return 0.85
         case .responding: return 0.6
+        case .tool:       return 0.85
+        case .approve:    return 0.75
         case .error:      return 0.6
         case .success:    return 0.9
         case .goodbye:    return 0.3
@@ -73,6 +81,8 @@ enum AvatarState: String, CaseIterable {
         case .thinking:   return 0.8
         case .working:    return 2.5
         case .responding: return 1.5
+        case .tool:       return 2.8
+        case .approve:    return 1.5
         case .error:      return 3.0
         case .success:    return 2.0
         case .goodbye:    return 0.4
@@ -87,6 +97,8 @@ enum AvatarState: String, CaseIterable {
         case .thinking:   return 1.5
         case .working:    return 3.5
         case .responding: return 3.0
+        case .tool:       return 3.5
+        case .approve:    return 2.0
         case .error:      return 1.0
         case .success:    return 4.0
         case .goodbye:    return 1.0
@@ -102,10 +114,29 @@ enum AvatarState: String, CaseIterable {
         case .thinking:   return 10
         case .working:    return 18
         case .responding: return 12
+        case .tool:       return 15
+        case .approve:    return 6
         case .error:      return 5
         case .success:    return 15
         case .goodbye:    return 3
         case .sleep:      return 3
+        }
+    }
+
+    /// State priority: higher values override lower ones during rapid transitions
+    var priority: Int {
+        switch self {
+        case .sleep:      return 0
+        case .goodbye:    return 1
+        case .idle:       return 2
+        case .listening:  return 3
+        case .thinking:   return 4
+        case .working:    return 5
+        case .responding: return 5
+        case .tool:       return 6
+        case .success:    return 7
+        case .error:      return 8
+        case .approve:    return 9  // highest — always visible
         }
     }
 
@@ -117,6 +148,8 @@ enum AvatarState: String, CaseIterable {
         case .thinking:   return 10.0
         case .working:    return 4.0
         case .responding: return 6.0
+        case .tool:       return 5.0
+        case .approve:    return 3.0
         case .error:      return 2.0
         case .success:    return 4.0
         case .goodbye:    return 12.0

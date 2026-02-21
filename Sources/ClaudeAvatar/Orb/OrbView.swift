@@ -8,14 +8,30 @@ final class OrbView: NSView {
     private let bodyLayer = CALayer()
     private let tentacleLayer = TentacleLayer()
     private let effectLayer = EffectLayer()
+    private let cookingLayer = CookingLayer()
     private let faceLayer = FaceLayer()
     private let animator = Animator()
     private var lifeAnimator: LifeAnimator?
 
+    // Approve exclamation mark (! above head)
+    private let exclamationBar = CAShapeLayer()
+    private let exclamationDot = CAShapeLayer()
+    private var exclamationVisible = false
+    private var exclamationOpacity: CGFloat = 0
+    private var exclamationBouncePhase: CGFloat = 0
+    private var exclamationTimer: Timer?
+
     private var currentState: AvatarState = .idle
     private var sleepTimer: DispatchSourceTimer?
+    private var successTimer: DispatchSourceTimer?
 
     private let sleepDelay: TimeInterval = 120 // 2 minutes
+
+    /// Body hit rect with ~10% margin, for drag hitbox
+    var bodyHitRect: NSRect {
+        let margin = bodyLayer.frame.width * 0.10
+        return bodyLayer.frame.insetBy(dx: -margin, dy: -margin)
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -34,7 +50,7 @@ final class OrbView: NSView {
         // Glow layer (outermost, on root)
         layer?.addSublayer(glowLayer)
 
-        // Avatar container (holds body, tentacles, effects, face)
+        // Avatar container (holds body, tentacles, effects, cooking, face, exclamation)
         layer?.addSublayer(avatarContainer)
 
         // Body layer: flat colored rectangle, sharp corners
@@ -44,11 +60,26 @@ final class OrbView: NSView {
         // Tentacle layer
         avatarContainer.addSublayer(tentacleLayer)
 
-        // Effect layer (above tentacles, below face)
+        // Effect layer (above tentacles, below cooking)
         avatarContainer.addSublayer(effectLayer)
 
-        // Face layer (topmost)
+        // Cooking layer (above effects, below face)
+        avatarContainer.addSublayer(cookingLayer)
+
+        // Face layer
         avatarContainer.addSublayer(faceLayer)
+
+        // Exclamation mark layers (topmost, above face)
+        let exclamColor = AvatarState.approve.primaryColor.cgColor
+        exclamationBar.fillColor = exclamColor
+        exclamationBar.strokeColor = nil
+        exclamationBar.opacity = 0
+        avatarContainer.addSublayer(exclamationBar)
+
+        exclamationDot.fillColor = exclamColor
+        exclamationDot.strokeColor = nil
+        exclamationDot.opacity = 0
+        avatarContainer.addSublayer(exclamationDot)
 
         // Set initial expression
         layoutLayers()
@@ -56,14 +87,13 @@ final class OrbView: NSView {
         tentacleLayer.updateForState(.idle, animated: false)
         effectLayer.updateColor(AvatarState.idle.primaryColor.cgColor, animated: false)
 
-        // Breathing is now timer-based in LifeAnimator — no CA animation needed
-
         // Start life animations (float timer controls container + glow + breathing)
         lifeAnimator = LifeAnimator(
             faceLayer: faceLayer,
             bodyLayer: bodyLayer,
             tentacleLayer: tentacleLayer,
             effectLayer: effectLayer,
+            cookingLayer: cookingLayer,
             glowLayer: glowLayer,
             avatarContainer: avatarContainer
         )
@@ -90,22 +120,21 @@ final class OrbView: NSView {
     private func layoutLayers() {
         let b = bounds
 
-        // Avatar content area: ~1/3 of window, centered
-        let contentSize = b.width / 3.0
+        // Body dimensions: wide rectangle (~1.9:1 ratio, matching Figma 1483:782)
+        let bodyWidth: CGFloat = 140
+        let bodyHeight: CGFloat = 74
 
-        // Glow: tight around content area
-        let glowSize = contentSize * 0.66
+        // Glow: sized relative to body
+        let glowSize = bodyHeight * 1.3
         let glowOrigin = CGPoint(x: (b.width - glowSize) / 2, y: (b.height - glowSize) / 2)
         glowLayer.frame = CGRect(origin: glowOrigin, size: CGSize(width: glowSize, height: glowSize))
 
         // Container: full bounds (float timer moves its position)
         avatarContainer.frame = b
 
-        // Body: wide rectangle, centered in container, shifted up for tentacles
-        let bodyWidth = contentSize * 0.6
-        let bodyHeight = bodyWidth * 0.65
+        // Body: centered, lowered 15px
         let bodyOriginX = (b.width - bodyWidth) / 2
-        let bodyOriginY = (b.height - bodyHeight) / 2 + contentSize * 0.08
+        let bodyOriginY = (b.height - bodyHeight) / 2 - 15
         bodyLayer.frame = CGRect(x: bodyOriginX, y: bodyOriginY, width: bodyWidth, height: bodyHeight)
         bodyLayer.cornerRadius = 0
 
@@ -116,6 +145,10 @@ final class OrbView: NSView {
         // Effect layer: full container bounds, positions internally using bodyFrame
         effectLayer.frame = b
         effectLayer.bodyFrame = CGRect(x: bodyOriginX, y: bodyOriginY, width: bodyWidth, height: bodyHeight)
+
+        // Cooking layer: full container bounds, positions internally using bodyFrame
+        cookingLayer.frame = b
+        cookingLayer.bodyFrame = CGRect(x: bodyOriginX, y: bodyOriginY, width: bodyWidth, height: bodyHeight)
 
         // Face: same as body
         faceLayer.frame = bodyLayer.frame
@@ -134,8 +167,20 @@ final class OrbView: NSView {
         }
 
         guard state != currentState else { return }
+
+        // State priority: lower-priority states cannot override higher-priority ones
+        // Exception: idle/sleep/goodbye always accepted (they are explicit session-level states)
+        if state != .idle && state != .sleep && state != .goodbye {
+            if state.priority < currentState.priority {
+                return  // reject lower-priority state
+            }
+        }
+
         let previousState = currentState
         currentState = state
+
+        // Cancel success timer on any new state
+        cancelSuccessTimer()
 
         // Animate glow color
         glowLayer.updateColor(state.glowColor, intensity: state.glowIntensity, animated: true)
@@ -172,12 +217,27 @@ final class OrbView: NSView {
             faceLayer.startMouthBreathing()
         }
 
+        // Cooking layer: show on tool state, hide otherwise
+        if state == .tool {
+            cookingLayer.setVisible(true, animated: true)
+        } else if previousState == .tool {
+            cookingLayer.setVisible(false, animated: true)
+        }
+
+        // Exclamation mark: show on approve, hide otherwise
+        if state == .approve {
+            showExclamation()
+        } else if exclamationVisible {
+            hideExclamation()
+        }
+
         // State-specific animations
         animator.stopStateAnimation(on: self.layer!)
 
         switch state {
         case .success:
             animator.flash(layer: glowLayer)
+            scheduleSuccessTimer()
         case .goodbye:
             animator.fadeOut(layer: self.layer!) {
                 NotificationCenter.default.post(name: .avatarShouldHide, object: nil)
@@ -196,6 +256,87 @@ final class OrbView: NSView {
         } else {
             cancelSleepTimer()
         }
+    }
+
+    // MARK: - Exclamation Mark (!)
+
+    private func showExclamation() {
+        exclamationVisible = true
+        exclamationBouncePhase = 0
+
+        let exclamColor = AvatarState.approve.primaryColor.cgColor
+        exclamationBar.fillColor = exclamColor
+        exclamationDot.fillColor = exclamColor
+
+        // Start bounce animation timer
+        if exclamationTimer == nil {
+            let timer = Timer(timeInterval: 0.016, repeats: true) { [weak self] _ in
+                self?.exclamationTick()
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            exclamationTimer = timer
+        }
+    }
+
+    private func hideExclamation() {
+        exclamationVisible = false
+        // Timer will fade out and stop itself
+    }
+
+    private func exclamationTick() {
+        let dt: CGFloat = 0.016
+        exclamationBouncePhase += dt
+
+        // Fade in/out
+        let targetO: CGFloat = exclamationVisible ? 1.0 : 0.0
+        exclamationOpacity += (targetO - exclamationOpacity) * 0.15
+        if exclamationOpacity < 0.01 && !exclamationVisible {
+            exclamationOpacity = 0
+            exclamationBar.opacity = 0
+            exclamationDot.opacity = 0
+            exclamationTimer?.invalidate()
+            exclamationTimer = nil
+            return
+        }
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+
+        let bw = bodyLayer.frame.width
+        let bh = bodyLayer.frame.height
+        let bx = bodyLayer.frame.origin.x
+        let bodyTop = bodyLayer.frame.maxY
+
+        // Exclamation mark dimensions (8-bit pixel rects, sized to body height)
+        let barW = floor(bh * 0.12)
+        let barH = floor(bh * 0.40)
+        let dotSize = floor(bh * 0.12)
+        let gap = floor(bh * 0.06)
+
+        // Follow eye gaze (shift horizontally with eyes, subtle vertical)
+        let eyeDx = faceLayer.currentEyeOffsetX
+        let eyeDy = faceLayer.currentEyeOffsetY
+        let gazeShiftX = eyeDx * bh * 0.04
+        let gazeShiftY = eyeDy * bh * 0.02
+
+        let centerX = floor(bx + bw / 2 - barW / 2 + gazeShiftX)
+
+        // Gentle bounce (subtle bob up and down)
+        let bounce = floor(sin(exclamationBouncePhase * 3.0) * bh * 0.03)
+        let baseY = bodyTop + floor(bh * 0.25) + 8 + gazeShiftY
+
+        // Dot (bottom of exclamation)
+        let dotY = baseY + bounce
+        exclamationDot.path = CGPath(rect: CGRect(x: centerX, y: dotY, width: dotSize, height: dotSize), transform: nil)
+
+        // Bar (above dot)
+        let barY = dotY + dotSize + gap
+        exclamationBar.path = CGPath(rect: CGRect(x: centerX, y: barY, width: barW, height: barH), transform: nil)
+
+        exclamationBar.opacity = Float(exclamationOpacity)
+        exclamationDot.opacity = Float(exclamationOpacity)
+
+        CATransaction.commit()
     }
 
     // MARK: - Sleep
@@ -217,6 +358,27 @@ final class OrbView: NSView {
     private func cancelSleepTimer() {
         sleepTimer?.cancel()
         sleepTimer = nil
+    }
+
+    // MARK: - Success Auto-Timer
+
+    private func scheduleSuccessTimer() {
+        cancelSuccessTimer()
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + 1.5)
+        timer.setEventHandler { [weak self] in
+            guard let self = self else { return }
+            if self.currentState == .success {
+                self.transitionTo(.idle)
+            }
+        }
+        successTimer = timer
+        timer.resume()
+    }
+
+    private func cancelSuccessTimer() {
+        successTimer?.cancel()
+        successTimer = nil
     }
 
     private func performWake(to state: AvatarState) {
