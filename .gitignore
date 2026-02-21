@@ -4,3 +4,15 @@
 *.o
 *.d
 DerivedData/
+
+# Security: prevent accidental commit of secrets
+*.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*secret*
+*credential*
+*.keychain
+*.keychain-db

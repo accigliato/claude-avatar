@@ -9,17 +9,21 @@ final class StateFileWatcher {
     private var lastModification: Date?
     private var onChange: ((AvatarState) -> Void)?
 
-    init(filePath: String = "/tmp/claude-avatar-state.json") {
+    init(filePath: String = {
+        let tmpdir = ProcessInfo.processInfo.environment["TMPDIR"] ?? "/tmp"
+        return (tmpdir as NSString).appendingPathComponent("claude-avatar-state.json")
+    }()) {
         self.filePath = filePath
     }
 
     func start(onChange: @escaping (AvatarState) -> Void) {
         self.onChange = onChange
 
-        // Create the file if it doesn't exist
+        // Create the file if it doesn't exist (owner-only permissions)
         if !FileManager.default.fileExists(atPath: filePath) {
             let initial = "{\"state\":\"idle\",\"timestamp\":\(Int(Date().timeIntervalSince1970))}"
-            FileManager.default.createFile(atPath: filePath, contents: initial.data(using: .utf8))
+            FileManager.default.createFile(atPath: filePath, contents: initial.data(using: .utf8),
+                                           attributes: [.posixPermissions: 0o600])
         }
 
         // Try DispatchSource first
