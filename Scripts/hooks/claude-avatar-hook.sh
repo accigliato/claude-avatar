@@ -23,6 +23,9 @@ case "$EVENT" in
       STATE=""
     fi
     ;;
+  # NOTE: PermissionRequest doesn't fire for every approval prompt —
+  # it depends on the user's permission mode and allow/deny settings.
+  # The exclamation mark (approve state) won't show for auto-allowed tools.
   PermissionRequest)   STATE="approve" ;;
   SessionEnd)          STATE="goodbye" ;;
   *)                   STATE="" ;;
