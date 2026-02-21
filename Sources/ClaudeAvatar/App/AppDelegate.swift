@@ -76,8 +76,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func handleShouldHide() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) { [weak self] in
-            self?.window.orderOut(nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+            NSApplication.shared.terminate(nil)
         }
     }
 
