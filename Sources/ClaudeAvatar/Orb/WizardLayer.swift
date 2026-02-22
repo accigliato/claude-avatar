@@ -54,9 +54,9 @@ final class WizardLayer: CALayer {
     private var orbColorPhase: CGFloat = 0
 
     // Colors
-    private let coneColor = NSColor(red: 0.545, green: 0.424, blue: 0.878, alpha: 1.0).cgColor  // #8b6ce0 lighter purple
-    private let brimColor = NSColor(red: 0.439, green: 0.239, blue: 0.863, alpha: 1.0).cgColor  // #703ddc darker purple
-    private let robeColor = NSColor(red: 0.527, green: 0.302, blue: 1.00, alpha: 1.0).cgColor   // #864dff
+    private let coneColor = NSColor(red: 0.439, green: 0.239, blue: 0.863, alpha: 1.0).cgColor  // #703ddc uniform purple
+    private let brimColor = NSColor(red: 0.439, green: 0.239, blue: 0.863, alpha: 1.0).cgColor  // #703ddc
+    private let robeColor = NSColor(red: 0.439, green: 0.239, blue: 0.863, alpha: 1.0).cgColor  // #703ddc
     private let starColor = NSColor(red: 1.0, green: 0.784, blue: 0.275, alpha: 1.0).cgColor    // #ffc846 golden yellow
 
     private struct ParticleState {
@@ -366,35 +366,35 @@ final class WizardLayer: CALayer {
 
         // --- Cone stars (7 stars, Figma positions normalized to cone bounds) ---
         // From Figma stelleCappello: Star 1-7 with positions/sizes relative to cone
-        let coneStarSpecs: [(x: CGFloat, y: CGFloat, size: CGFloat)] = [
-            (0.10, 0.50, 0.20),   // Star 1: big, lower-left
-            (0.49, 0.64, 0.19),   // Star 2: big, center-right
-            (0.34, 0.35, 0.12),   // Star 3: medium, center
-            (0.32, 0.78, 0.09),   // Star 6: small, lower-center
-            (0.27, 0.36, 0.07),   // Star 7: small, upper-left-ish
-            (0.78, 0.26, 0.08),   // Star 4: small, right side
-            (0.58, 0.08, 0.11),   // Star 5: medium, near peak
+        let coneStarSpecs: [(x: CGFloat, y: CGFloat, size: CGFloat, rot: CGFloat)] = [
+            (0.10, 0.50, 0.20,  0.15),  // Star 1: big, lower-left
+            (0.49, 0.64, 0.19, -0.20),  // Star 2: big, center-right
+            (0.34, 0.35, 0.12,  0.40),  // Star 3: medium, center
+            (0.32, 0.78, 0.09, -0.10),  // Star 6: small, lower-center
+            (0.27, 0.36, 0.07,  0.55),  // Star 7: small, upper-left-ish
+            (0.78, 0.26, 0.08, -0.35),  // Star 4: small, right side
+            (0.58, 0.08, 0.11,  0.25),  // Star 5: medium, near peak
         ]
         for (i, spec) in coneStarSpecs.enumerated() where i < coneStarLayers.count {
             let sx = floor(coneLeftX + spec.x * coneW)
             let sy = floor(coneBaseY + spec.y * coneH)
             let ss = floor(spec.size * coneH)
-            coneStarLayers[i].path = sixPointStarPath(cx: sx, cy: sy, size: ss)
+            coneStarLayers[i].path = fivePointStarPath(cx: sx, cy: sy, size: ss, rotation: spec.rot)
         }
 
         // --- Brim stars (5 visible stars) ---
-        let brimStarSpecs: [(x: CGFloat, y: CGFloat, size: CGFloat)] = [
-            (0.10, 0.50, 0.65),   // big star, left
-            (0.82, 0.55, 0.60),   // big star, right
-            (0.76, 0.25, 0.30),   // medium, right-center
-            (0.43, 0.35, 0.22),   // small, center
-            (0.55, 0.70, 0.15),   // tiny, center-low
+        let brimStarSpecs: [(x: CGFloat, y: CGFloat, size: CGFloat, rot: CGFloat)] = [
+            (0.10, 0.50, 0.65,  0.10),  // big star, left
+            (0.82, 0.55, 0.60, -0.15),  // big star, right
+            (0.76, 0.25, 0.30,  0.30),  // medium, right-center
+            (0.43, 0.35, 0.22, -0.25),  // small, center
+            (0.55, 0.70, 0.15,  0.45),  // tiny, center-low
         ]
         for (i, spec) in brimStarSpecs.enumerated() where i < brimStarLayers.count {
             let sx = floor(brimX + spec.x * brimW)
             let sy = floor(brimY + spec.y * brimH)
             let ss = floor(spec.size * brimH)
-            brimStarLayers[i].path = sixPointStarPath(cx: sx, cy: sy, size: ss)
+            brimStarLayers[i].path = fivePointStarPath(cx: sx, cy: sy, size: ss, rotation: spec.rot)
         }
     }
 
@@ -465,17 +465,17 @@ final class WizardLayer: CALayer {
         let robeH = floor(bh * 0.405)
         robeLayer.path = CGPath(rect: CGRect(x: bx, y: by, width: bw, height: robeH), transform: nil)
 
-        // Stars on robe (static)
-        let robeStarSpecs: [(x: CGFloat, y: CGFloat, size: CGFloat)] = [
-            (0.25, 0.55, 0.35),
-            (0.65, 0.40, 0.25),
-            (0.50, 0.75, 0.15),
+        // Stars on robe (static, each with fixed rotation)
+        let robeStarSpecs: [(x: CGFloat, y: CGFloat, size: CGFloat, rot: CGFloat)] = [
+            (0.25, 0.55, 0.35,  0.20),
+            (0.65, 0.40, 0.25, -0.30),
+            (0.50, 0.75, 0.15,  0.50),
         ]
         for (i, spec) in robeStarSpecs.enumerated() where i < robeStarLayers.count {
             let sx = floor(bx + bw * spec.x)
             let sy = floor(by + robeH * spec.y)
             let ss = floor(robeH * spec.size)
-            robeStarLayers[i].path = sixPointStarPath(cx: sx, cy: sy, size: ss)
+            robeStarLayers[i].path = fivePointStarPath(cx: sx, cy: sy, size: ss, rotation: spec.rot)
         }
     }
 
@@ -632,19 +632,25 @@ final class WizardLayer: CALayer {
         return path
     }
 
-    /// 6-pointed star: 3 overlapping rects rotated at 0°, 60°, -60°
-    private func sixPointStarPath(cx: CGFloat, cy: CGFloat, size: CGFloat) -> CGPath {
+    /// 5-pointed star (Figma 585:45). innerRadius ~38% of outer for classic proportions.
+    private func fivePointStarPath(cx: CGFloat, cy: CGFloat, size: CGFloat, rotation: CGFloat = 0) -> CGPath {
         let path = CGMutablePath()
-        let w = floor(size)
-        let h = floor(size * 0.35) // rect thickness
+        let outerR = size / 2
+        let innerR = outerR * 0.382 // golden ratio inner radius
+        let startAngle = CGFloat.pi / 2 + rotation // top point up
 
-        for angle in [0.0, CGFloat.pi / 3.0, -CGFloat.pi / 3.0] {
-            let rect = CGRect(x: -w / 2, y: -h / 2, width: w, height: h)
-            var t = CGAffineTransform.identity
-            t = t.translatedBy(x: cx, y: cy)
-            t = t.rotated(by: angle)
-            path.addRect(rect, transform: t)
+        for i in 0..<10 {
+            let r = i % 2 == 0 ? outerR : innerR
+            let angle = startAngle + CGFloat(i) * (.pi / 5)
+            let px = floor(cx + cos(angle) * r)
+            let py = floor(cy + sin(angle) * r)
+            if i == 0 {
+                path.move(to: CGPoint(x: px, y: py))
+            } else {
+                path.addLine(to: CGPoint(x: px, y: py))
+            }
         }
+        path.closeSubpath()
         return path
     }
 
