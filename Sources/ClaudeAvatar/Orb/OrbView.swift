@@ -22,6 +22,20 @@ final class OrbView: NSView {
     private var exclamationBouncePhase: CGFloat = 0
     private var exclamationTimer: Timer?
 
+    private lazy var approveSound: NSSound? = {
+        let execURL = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent()
+        let candidates = [
+            execURL.appendingPathComponent("fah.mp3").path,
+            NSHomeDirectory() + "/.local/bin/fah.mp3"
+        ]
+        for path in candidates {
+            if let sound = NSSound(contentsOfFile: path, byReference: true) {
+                return sound
+            }
+        }
+        return nil
+    }()
+
     private var currentState: AvatarState = .idle
     private var sleepTimer: DispatchSourceTimer?
     private var successTimer: DispatchSourceTimer?
@@ -234,8 +248,10 @@ final class OrbView: NSView {
         // Wizard layer: show on thinking/planning, hide otherwise
         wizardLayer.setVisible(state == .thinking || state == .planning, animated: true)
 
-        // Exclamation mark: show on approve, hide otherwise
+        // Exclamation mark + sound: show on approve, hide otherwise
         if state == .approve {
+            approveSound?.stop()
+            approveSound?.play()
             showExclamation()
         } else if exclamationVisible {
             hideExclamation()

@@ -3,6 +3,23 @@ STATE_FILE="${TMPDIR:-/tmp}/claude-avatar-state.json"
 INPUT=$(cat)
 EVENT=$(echo "$INPUT" | /usr/bin/python3 -c "import sys,json; print(json.load(sys.stdin).get('hook_event_name',''))" 2>/dev/null)
 PERMISSION_MODE=$(echo "$INPUT" | /usr/bin/python3 -c "import sys,json; print(json.load(sys.stdin).get('permission_mode',''))" 2>/dev/null)
+TOOL_NAME=$(echo "$INPUT" | /usr/bin/python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+t=d.get('tool_name','') or d.get('tool',{}).get('name','') or ''
+print(t)
+" 2>/dev/null)
+TOOL_INPUT=$(echo "$INPUT" | /usr/bin/python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+ti=d.get('tool_input','') or d.get('tool',{}).get('input',{})
+if isinstance(ti,dict):
+    # For Bash, show command; for others, show first key value
+    v=ti.get('command','') or ti.get('pattern','') or ti.get('file_path','') or ''
+    print(str(v)[:80])
+else:
+    print(str(ti)[:80])
+" 2>/dev/null)
 
 case "$EVENT" in
   SessionStart)
@@ -59,7 +76,13 @@ print(d.get('notification',{}).get('type','') or d.get('notification_type',''))
 esac
 
 if [ -n "$STATE" ]; then
-  echo "{\"state\":\"$STATE\",\"timestamp\":$(date +%s)}" > "$STATE_FILE"
+  EXTRA=""
+  if [ -n "$TOOL_NAME" ]; then
+    # Escape quotes in tool input for JSON safety
+    SAFE_INPUT=$(echo "$TOOL_INPUT" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    EXTRA=",\"tool\":\"$TOOL_NAME\",\"tool_detail\":\"$SAFE_INPUT\""
+  fi
+  echo "{\"state\":\"$STATE\",\"timestamp\":$(date +%s)${EXTRA}}" > "$STATE_FILE"
   chmod 600 "$STATE_FILE"
 fi
 exit 0
