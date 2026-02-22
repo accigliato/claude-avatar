@@ -24,6 +24,7 @@ final class OrbView: NSView {
     private var currentState: AvatarState = .idle
     private var sleepTimer: DispatchSourceTimer?
     private var successTimer: DispatchSourceTimer?
+    private var stateTimeoutTimer: DispatchSourceTimer?
 
     private let sleepDelay: TimeInterval = 120 // 2 minutes
 
@@ -168,19 +169,12 @@ final class OrbView: NSView {
 
         guard state != currentState else { return }
 
-        // State priority: lower-priority states cannot override higher-priority ones
-        // Exception: idle/sleep/goodbye always accepted (they are explicit session-level states)
-        if state != .idle && state != .sleep && state != .goodbye {
-            if state.priority < currentState.priority {
-                return  // reject lower-priority state
-            }
-        }
-
         let previousState = currentState
         currentState = state
 
-        // Cancel success timer on any new state
+        // Cancel timers on any new state
         cancelSuccessTimer()
+        cancelStateTimeout()
 
         // Animate glow color
         glowLayer.updateColor(state.glowColor, intensity: state.glowIntensity, animated: true)
@@ -217,12 +211,8 @@ final class OrbView: NSView {
             faceLayer.startMouthBreathing()
         }
 
-        // Cooking layer: show on tool state, hide otherwise
-        if state == .tool {
-            cookingLayer.setVisible(true, animated: true)
-        } else if previousState == .tool {
-            cookingLayer.setVisible(false, animated: true)
-        }
+        // Cooking layer: show on tool state, hide in all other states
+        cookingLayer.setVisible(state == .tool, animated: true)
 
         // Exclamation mark: show on approve, hide otherwise
         if state == .approve {
@@ -249,6 +239,9 @@ final class OrbView: NSView {
         default:
             break
         }
+
+        // Safety timeout for states that may not get an explicit exit hook
+        scheduleStateTimeoutIfNeeded(state)
 
         // Reset sleep timer for active states
         if state != .sleep && state != .goodbye {
@@ -379,6 +372,31 @@ final class OrbView: NSView {
     private func cancelSuccessTimer() {
         successTimer?.cancel()
         successTimer = nil
+    }
+
+    // MARK: - State Timeout Safety Net
+
+    private func scheduleStateTimeoutIfNeeded(_ state: AvatarState) {
+        let timeout: TimeInterval
+        switch state {
+        case .approve: timeout = 30
+        case .tool:    timeout = 120
+        default:       return
+        }
+
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + timeout)
+        timer.setEventHandler { [weak self] in
+            guard let self = self, self.currentState == state else { return }
+            self.transitionTo(.idle)
+        }
+        stateTimeoutTimer = timer
+        timer.resume()
+    }
+
+    private func cancelStateTimeout() {
+        stateTimeoutTimer?.cancel()
+        stateTimeoutTimer = nil
     }
 
     private func performWake(to state: AvatarState) {

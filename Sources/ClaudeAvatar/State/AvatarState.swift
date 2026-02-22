@@ -123,23 +123,6 @@ enum AvatarState: String, CaseIterable {
         }
     }
 
-    /// State priority: higher values override lower ones during rapid transitions
-    var priority: Int {
-        switch self {
-        case .sleep:      return 0
-        case .goodbye:    return 1
-        case .idle:       return 2
-        case .listening:  return 3
-        case .thinking:   return 4
-        case .working:    return 5
-        case .responding: return 5
-        case .tool:       return 6
-        case .success:    return 7
-        case .error:      return 8
-        case .approve:    return 9  // highest — always visible
-        }
-    }
-
     /// Float period in seconds (full cycle time)
     var floatPeriod: CGFloat {
         switch self {
