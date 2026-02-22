@@ -132,8 +132,8 @@ final class WizardLayer: CALayer {
         robeLayer.opacity = 0
         addSublayer(robeLayer)
 
-        // Robe stars (3 yellow stars)
-        for _ in 0..<3 {
+        // Robe stars (9 yellow stars)
+        for _ in 0..<9 {
             let star = CAShapeLayer()
             star.fillColor = starColor
             star.strokeColor = nil
@@ -318,7 +318,7 @@ final class WizardLayer: CALayer {
         let brimX = floor(bx + (bw - brimW) / 2)
 
         // Brim sits on top of body with small overlap
-        let brimRestY = by + bh - floor(bh * 0.02)
+        let brimRestY = by + bh - floor(bh * 0.02) + 1
         let brimStartY = brimRestY + bh * 2.0
         let brimY = floor(brimStartY + (brimRestY - brimStartY) * bounce)
 
@@ -465,11 +465,19 @@ final class WizardLayer: CALayer {
         let robeH = floor(bh * 0.405)
         robeLayer.path = CGPath(rect: CGRect(x: bx, y: by, width: bw, height: robeH), transform: nil)
 
-        // Stars on robe (static, each with fixed rotation)
+        // Stars on robe — mostly in the lower half (visible below beard)
         let robeStarSpecs: [(x: CGFloat, y: CGFloat, size: CGFloat, rot: CGFloat)] = [
-            (0.25, 0.55, 0.35,  0.20),
-            (0.65, 0.40, 0.25, -0.30),
-            (0.50, 0.75, 0.15,  0.50),
+            // Lower area (always visible)
+            (0.20, 0.15, 0.30,  0.20),
+            (0.75, 0.10, 0.25, -0.30),
+            (0.50, 0.25, 0.18,  0.50),
+            (0.10, 0.35, 0.12, -0.15),
+            (0.88, 0.30, 0.14,  0.35),
+            (0.40, 0.08, 0.10, -0.40),
+            (0.65, 0.35, 0.10,  0.15),
+            // Upper edges (peeking out from sides of beard)
+            (0.05, 0.60, 0.12,  0.25),
+            (0.92, 0.55, 0.10, -0.20),
         ]
         for (i, spec) in robeStarSpecs.enumerated() where i < robeStarLayers.count {
             let sx = floor(bx + bw * spec.x)

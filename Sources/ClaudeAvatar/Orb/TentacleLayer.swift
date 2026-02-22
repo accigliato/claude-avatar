@@ -57,7 +57,9 @@ final class TentacleLayer: CALayer {
         targetFrequency = state.tentacleFrequency
         targetAmplitude = state.tentacleAmplitude
 
-        let newColor = state.primaryColor.cgColor
+        // Wizard/cooking states keep idle orange (outfit covers body, tentacles should match)
+        let colorState = (state == .thinking || state == .planning || state == .tool) ? AvatarState.idle : state
+        let newColor = colorState.primaryColor.cgColor
         if animated {
             let anim = CABasicAnimation(keyPath: "fillColor")
             anim.toValue = newColor

@@ -101,12 +101,12 @@ final class LifeAnimator {
         loaderTimer = nil
 
         if state == .tool {
-            // Tool state: retract tentacles, hide effects (CookingLayer handles visuals)
-            tentacleLayer?.retract()
+            // Tool state: keep tentacles, hide effects (CookingLayer handles visuals)
+            tentacleLayer?.extend()
             effectLayer?.setMode(.none, animated: true)
         } else if state == .thinking || state == .planning {
-            // Wizard states: retract tentacles, no effects (WizardLayer orb replaces thinking dots)
-            tentacleLayer?.retract()
+            // Wizard states: keep tentacles, no effects (WizardLayer orb replaces thinking dots)
+            tentacleLayer?.extend()
             effectLayer?.setMode(.none, animated: true)
         } else if state == .working {
             tentacleLayer?.retract()
