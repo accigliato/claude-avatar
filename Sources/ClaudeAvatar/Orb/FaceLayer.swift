@@ -9,6 +9,12 @@ final class FaceLayer: CALayer {
     private let rightEyeBorder = CAShapeLayer()
     private let mouth = CAShapeLayer()
 
+    // Planning SGA eye overlay
+    private let leftEyeSGA = CATextLayer()
+    private let rightEyeSGA = CATextLayer()
+    private var sgaGlitchTimer: Timer?
+    private var sgaTickCount: Int = 0
+
     private let featureColor = NSColor.black.cgColor
 
     // Current base expression (set by state)
@@ -60,6 +66,27 @@ final class FaceLayer: CALayer {
         mouth.fillColor = featureColor
         mouth.strokeColor = nil
         addSublayer(mouth)
+
+        // SGA eye overlays for planning state
+        let sgaColor = NSColor(red: 0.314, green: 0.302, blue: 1.00, alpha: 1.0).cgColor // #504dff
+        for sga in [leftEyeSGA, rightEyeSGA] {
+            sga.foregroundColor = sgaColor
+            sga.alignmentMode = .center
+            sga.contentsScale = 2.0
+            sga.opacity = 0
+            sga.string = "w"
+            if let font = NSFont(name: "SGA Font", size: 12) {
+                sga.font = font
+                sga.fontSize = 12
+            } else if let font = NSFont(name: "SGAFont", size: 12) {
+                sga.font = font
+                sga.fontSize = 12
+            } else {
+                sga.font = NSFont(name: "Menlo", size: 10)
+                sga.fontSize = 10
+            }
+            addSublayer(sga)
+        }
     }
 
     override func layoutSublayers() {
@@ -81,8 +108,25 @@ final class FaceLayer: CALayer {
         mouthOffsetY = 0
         squintFactor = 0
         mouthReactionOpenness = 0
-        updateEyeBorderColor(for: state, animated: animated)
+        // Wizard states: eye border follows idle color (body stays orange)
+        if state == .thinking || state == .planning {
+            updateEyeBorderColor(for: .idle, animated: animated)
+        } else {
+            updateEyeBorderColor(for: state, animated: animated)
+        }
         applyExpression(animated: animated)
+
+        // Planning: white eyes with SGA glitch
+        if state == .planning {
+            let whiteColor = NSColor(white: 0.99, alpha: 1.0).cgColor // #fefefe
+            leftEye.fillColor = whiteColor
+            rightEye.fillColor = whiteColor
+            startSGAGlitch()
+        } else {
+            leftEye.fillColor = featureColor
+            rightEye.fillColor = featureColor
+            stopSGAGlitch()
+        }
     }
 
     func applySquint(_ factor: CGFloat, animated: Bool) {
@@ -358,6 +402,78 @@ final class FaceLayer: CALayer {
         }
     }
 
+    // MARK: - Planning SGA Glitch
+
+    private func startSGAGlitch() {
+        guard sgaGlitchTimer == nil else { return }
+        sgaTickCount = 0
+        leftEyeSGA.opacity = 1.0
+        rightEyeSGA.opacity = 1.0
+        let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
+            self?.sgaGlitchTick()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        sgaGlitchTimer = timer
+    }
+
+    private func stopSGAGlitch() {
+        sgaGlitchTimer?.invalidate()
+        sgaGlitchTimer = nil
+        leftEyeSGA.opacity = 0
+        rightEyeSGA.opacity = 0
+    }
+
+    private func sgaGlitchTick() {
+        sgaTickCount += 1
+        let letters = "abcdefghijklmnopqrstuvwxyz"
+
+        // Cycle characters every tick
+        leftEyeSGA.string = String(letters.randomElement() ?? "a")
+        rightEyeSGA.string = String(letters.randomElement() ?? "a")
+
+        // Every ~7 ticks, flicker one eye off briefly
+        if sgaTickCount % 7 == 0 {
+            let target = Bool.random() ? leftEyeSGA : rightEyeSGA
+            target.opacity = 0
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                guard self?.currentState == .planning else { return }
+                target.opacity = 1.0
+            }
+        }
+
+        // Position SGA overlays at eye centers
+        updateSGAPositions()
+    }
+
+    private func updateSGAPositions() {
+        let p = px
+        let xo = xOff
+        let ox = eyeOffsetX
+        let oy = eyeOffsetY
+
+        // Eye positions match thinking/planning eyePaths
+        let leftGX: CGFloat = 4.51 + ox
+        let leftGY: CGFloat = 10.5 + oy
+        let rightGX: CGFloat = 10.99 + ox
+        let rightGY: CGFloat = 10.5 + oy
+        let eyeW: CGFloat = 2.5
+        let eyeH: CGFloat = 2.5
+
+        let fontSize = floor(eyeW * p * 0.7)
+        for sga in [leftEyeSGA, rightEyeSGA] {
+            sga.fontSize = fontSize
+        }
+
+        // Center SGA text in each eye rect
+        let lx = xo + leftGX * p + (eyeW * p - fontSize) / 2
+        let ly = leftGY * p + (eyeH * p - fontSize) / 2
+        leftEyeSGA.frame = CGRect(x: floor(lx), y: floor(ly), width: ceil(fontSize * 1.2), height: ceil(fontSize * 1.2))
+
+        let rx = xo + rightGX * p + (eyeW * p - fontSize) / 2
+        let ry = rightGY * p + (eyeH * p - fontSize) / 2
+        rightEyeSGA.frame = CGRect(x: floor(rx), y: floor(ry), width: ceil(fontSize * 1.2), height: ceil(fontSize * 1.2))
+    }
+
     // MARK: - Eye Border Color
 
     private func updateEyeBorderColor(for state: AvatarState, animated: Bool) {
@@ -454,7 +570,7 @@ final class FaceLayer: CALayer {
             let right = pixelRect(gx: 9.49 + ox, gy: 8.5 + oy, gw: 3, gh: 3.5 * sq)
             return EyePaths(left: left, right: right)
 
-        case .thinking:
+        case .thinking, .planning:
             // Smaller + higher eyes — reflective gaze
             let left = pixelRect(gx: 4.51 + ox, gy: 10.5 + oy, gw: 2.5, gh: 2.5 * sq)
             let right = pixelRect(gx: 10.99 + ox, gy: 10.5 + oy, gw: 2.5, gh: 2.5 * sq)
@@ -543,6 +659,7 @@ final class FaceLayer: CALayer {
         case .idle:       return MouthParams(gx: 6.0, gy: 4.5, gw: 3.5, gh: 0.7)
         case .listening:  return MouthParams(gx: 5.5, gy: 4.5, gw: 4.5, gh: 0.8)
         case .thinking:   return MouthParams(gx: 7.2, gy: 4.5, gw: 2.0, gh: 0.6)  // asymmetric "hmm"
+        case .planning:   return MouthParams(gx: 6.8, gy: 4.5, gw: 2.5, gh: 0.5)  // contemplative
         case .working:    return MouthParams(gx: 6.5, gy: 4.5, gw: 2.5, gh: 0.5)  // tight determination
         case .responding: return MouthParams(gx: 5.5, gy: 4.3, gw: 5.0, gh: 1.2)
         case .tool:       return MouthParams(gx: 6.5, gy: 5.5, gw: 3.0, gh: 0.6)  // slight grin, above apron

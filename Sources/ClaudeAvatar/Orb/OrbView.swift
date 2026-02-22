@@ -9,6 +9,7 @@ final class OrbView: NSView {
     private let tentacleLayer = TentacleLayer()
     private let effectLayer = EffectLayer()
     private let cookingLayer = CookingLayer()
+    private let wizardLayer = WizardLayer()
     private let faceLayer = FaceLayer()
     private let animator = Animator()
     private var lifeAnimator: LifeAnimator?
@@ -67,6 +68,9 @@ final class OrbView: NSView {
         // Cooking layer (above effects, below face)
         avatarContainer.addSublayer(cookingLayer)
 
+        // Wizard layer (above effects, below face — same z as cooking)
+        avatarContainer.addSublayer(wizardLayer)
+
         // Face layer
         avatarContainer.addSublayer(faceLayer)
 
@@ -82,6 +86,10 @@ final class OrbView: NSView {
         exclamationDot.opacity = 0
         avatarContainer.addSublayer(exclamationDot)
 
+        // Wizard beard: reparent above everything (face, exclamation)
+        wizardLayer.beardLayer.removeFromSuperlayer()
+        avatarContainer.addSublayer(wizardLayer.beardLayer)
+
         // Set initial expression
         layoutLayers()
         faceLayer.setExpression(.idle, animated: false)
@@ -95,6 +103,7 @@ final class OrbView: NSView {
             tentacleLayer: tentacleLayer,
             effectLayer: effectLayer,
             cookingLayer: cookingLayer,
+            wizardLayer: wizardLayer,
             glowLayer: glowLayer,
             avatarContainer: avatarContainer
         )
@@ -151,6 +160,10 @@ final class OrbView: NSView {
         cookingLayer.frame = b
         cookingLayer.bodyFrame = CGRect(x: bodyOriginX, y: bodyOriginY, width: bodyWidth, height: bodyHeight)
 
+        // Wizard layer: full container bounds, positions internally using bodyFrame
+        wizardLayer.frame = b
+        wizardLayer.bodyFrame = CGRect(x: bodyOriginX, y: bodyOriginY, width: bodyWidth, height: bodyHeight)
+
         // Face: same as body
         faceLayer.frame = bodyLayer.frame
     }
@@ -179,8 +192,12 @@ final class OrbView: NSView {
         // Animate glow color
         glowLayer.updateColor(state.glowColor, intensity: state.glowIntensity, animated: true)
 
-        // Animate body color
-        animateBodyColor(for: state)
+        // Animate body color (wizard states keep idle orange — the outfit covers it)
+        if state == .thinking || state == .planning {
+            animateBodyColor(for: .idle)
+        } else {
+            animateBodyColor(for: state)
+        }
 
         // Animate face expression
         faceLayer.setExpression(state, animated: true)
@@ -213,6 +230,9 @@ final class OrbView: NSView {
 
         // Cooking layer: show on tool state, hide in all other states
         cookingLayer.setVisible(state == .tool, animated: true)
+
+        // Wizard layer: show on thinking/planning, hide otherwise
+        wizardLayer.setVisible(state == .thinking || state == .planning, animated: true)
 
         // Exclamation mark: show on approve, hide otherwise
         if state == .approve {
@@ -379,8 +399,10 @@ final class OrbView: NSView {
     private func scheduleStateTimeoutIfNeeded(_ state: AvatarState) {
         let timeout: TimeInterval
         switch state {
-        case .approve: timeout = 30
-        case .tool:    timeout = 120
+        case .approve:  timeout = 30
+        case .tool:     timeout = 120
+        case .planning: timeout = 120
+        case .error:    timeout = 5
         default:       return
         }
 

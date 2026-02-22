@@ -2,6 +2,7 @@
 STATE_FILE="${TMPDIR:-/tmp}/claude-avatar-state.json"
 INPUT=$(cat)
 EVENT=$(echo "$INPUT" | /usr/bin/python3 -c "import sys,json; print(json.load(sys.stdin).get('hook_event_name',''))" 2>/dev/null)
+PERMISSION_MODE=$(echo "$INPUT" | /usr/bin/python3 -c "import sys,json; print(json.load(sys.stdin).get('permission_mode',''))" 2>/dev/null)
 
 case "$EVENT" in
   SessionStart)
@@ -9,16 +10,40 @@ case "$EVENT" in
     # Launch the app if not already running
     pgrep -x ClaudeAvatar || "${CLAUDE_AVATAR_PATH:-$HOME/.local/bin/ClaudeAvatar}" &
     ;;
-  UserPromptSubmit)    STATE="thinking" ;;
-  PreToolUse)          STATE="tool" ;;
-  PostToolUse)         STATE="thinking" ;;
+  UserPromptSubmit)
+    if [ "$PERMISSION_MODE" = "plan" ]; then
+      STATE="planning"
+    else
+      STATE="thinking"
+    fi
+    ;;
+  PreToolUse)
+    if [ "$PERMISSION_MODE" = "plan" ]; then
+      STATE="planning"
+    else
+      STATE="tool"
+    fi
+    ;;
+  PostToolUse)
+    if [ "$PERMISSION_MODE" = "plan" ]; then
+      STATE="planning"
+    else
+      STATE="thinking"
+    fi
+    ;;
   PostToolUseFailure)  STATE="error" ;;
   Stop)                STATE="success" ;;
   Notification)
-    # Check if it's an idle prompt notification
-    TYPE=$(echo "$INPUT" | /usr/bin/python3 -c "import sys,json; print(json.load(sys.stdin).get('notification',{}).get('type',''))" 2>/dev/null)
+    # Check notification type (try both nested and top-level field)
+    TYPE=$(echo "$INPUT" | /usr/bin/python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+print(d.get('notification',{}).get('type','') or d.get('notification_type',''))
+" 2>/dev/null)
     if [ "$TYPE" = "idle_prompt" ]; then
       STATE="listening"
+    elif [ "$TYPE" = "permission_prompt" ]; then
+      STATE="approve"
     else
       STATE=""
     fi

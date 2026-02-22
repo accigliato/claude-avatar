@@ -8,6 +8,7 @@ final class LifeAnimator {
     private weak var tentacleLayer: TentacleLayer?
     private weak var effectLayer: EffectLayer?
     private weak var cookingLayer: CookingLayer?
+    private weak var wizardLayer: WizardLayer?
     private weak var glowLayer: CALayer?
     private weak var avatarContainer: CALayer?
 
@@ -47,12 +48,13 @@ final class LifeAnimator {
     var containerBasePosition: CGPoint = .zero
     var glowBasePosition: CGPoint = .zero
 
-    init(faceLayer: FaceLayer, bodyLayer: CALayer, tentacleLayer: TentacleLayer, effectLayer: EffectLayer, cookingLayer: CookingLayer, glowLayer: CALayer, avatarContainer: CALayer) {
+    init(faceLayer: FaceLayer, bodyLayer: CALayer, tentacleLayer: TentacleLayer, effectLayer: EffectLayer, cookingLayer: CookingLayer, wizardLayer: WizardLayer, glowLayer: CALayer, avatarContainer: CALayer) {
         self.faceLayer = faceLayer
         self.bodyLayer = bodyLayer
         self.tentacleLayer = tentacleLayer
         self.effectLayer = effectLayer
         self.cookingLayer = cookingLayer
+        self.wizardLayer = wizardLayer
         self.glowLayer = glowLayer
         self.avatarContainer = avatarContainer
     }
@@ -92,7 +94,7 @@ final class LifeAnimator {
         targetFloatRadius = state.floatRadius
         targetFloatPeriod = state.floatPeriod
         targetBreathingPeriod = state.breathingDuration
-        targetBodyBreathAmplitude = (state.isAlive && state != .tool) ? 0.02 : 0.0
+        targetBodyBreathAmplitude = (state.isAlive && state != .tool && state != .thinking && state != .planning) ? 0.02 : 0.0
 
         // Effect + tentacle management
         loaderTimer?.cancel()
@@ -102,12 +104,13 @@ final class LifeAnimator {
             // Tool state: retract tentacles, hide effects (CookingLayer handles visuals)
             tentacleLayer?.retract()
             effectLayer?.setMode(.none, animated: true)
+        } else if state == .thinking || state == .planning {
+            // Wizard states: retract tentacles, no effects (WizardLayer orb replaces thinking dots)
+            tentacleLayer?.retract()
+            effectLayer?.setMode(.none, animated: true)
         } else if state == .working {
             tentacleLayer?.retract()
             effectLayer?.setMode(.loader, animated: true)
-        } else if state == .thinking {
-            tentacleLayer?.retract()
-            effectLayer?.setMode(.thinking, animated: true)
         } else if state == .approve {
             // Approve: extend tentacles, no effects, alert scanning
             tentacleLayer?.extend()
@@ -214,6 +217,19 @@ final class LifeAnimator {
             cooking.transform = ct
         }
 
+        // Wizard layer + beard: breathing scale synced with body (same as cooking)
+        if let body = bodyLayer, let wizard = wizardLayer {
+            let offX = body.position.x - wizard.position.x
+            let offY = body.position.y - wizard.position.y
+            let s = bodyBreathScale
+            var wt = CATransform3DIdentity
+            wt = CATransform3DScale(wt, s, s, 1)
+            wt = CATransform3DTranslate(wt, offX * (1 - s), offY * (1 - s), 0)
+            wizard.transform = wt
+            // Beard is reparented above face but shares same coordinate space
+            wizard.beardLayer.transform = wt
+        }
+
         CATransaction.commit()
     }
 
@@ -228,6 +244,7 @@ final class LifeAnimator {
         case .idle:                return (2.5, 5.0)
         case .listening:           return (8.0, 15.0)
         case .thinking:            return (3.5, 6.0)
+        case .planning:            return (4.0, 7.0)
         case .working:             return (5.0, 8.0)
         case .responding:          return (2.0, 4.0)
         case .tool:                return (4.0, 7.0)
@@ -291,6 +308,7 @@ final class LifeAnimator {
         case .idle:       return ((1.5, 3.5), 0.8,  0,    0)
         case .listening:  return ((3.0, 5.0), 0.4,  0,    0)     // centered, staring at user
         case .thinking:   return ((2.0, 4.0), 0.6,  0,    0)     // no bias — looks all around
+        case .planning:   return ((2.5, 4.5), 0.5,  -0.3, 0.1)  // bias left (orb) + slight upward
         case .working:    return ((3.0, 5.0), 0.3,  0,    0)     // minimal, concentrated
         case .responding: return ((0.8, 2.0), 0.8,  0,    0)     // reading pattern (handled specially)
         case .tool:       return ((2.0, 4.0), 0.4,  -0.2, -0.1)  // focused down-left (watching pan)
@@ -356,6 +374,7 @@ final class LifeAnimator {
         switch state {
         case .listening:  return (10.0, 20.0)  // rare — focused on user
         case .thinking:   return (4.0, 8.0)
+        case .planning:   return (5.0, 10.0)
         case .tool:       return (6.0, 12.0)   // occasional glances while cooking
         case .approve:    return (3.0, 6.0)    // alert, looking around
         case .error:      return (3.0, 6.0)
@@ -372,39 +391,7 @@ final class LifeAnimator {
         timer.setEventHandler { [weak self] in
             guard let self = self, self.isRunning else { return }
 
-            // Determine glance target
-            var dx: CGFloat = 0
-            var dy: CGFloat = 0
-
-            if self.currentState == .thinking {
-                // Reflective gaze — looks in all directions
-                let direction = Int.random(in: 0...3)
-                switch direction {
-                case 0: dx = CGFloat.random(in: 0.5...2.0); dy = CGFloat.random(in: 0.8...1.8)     // upper-right
-                case 1: dx = CGFloat.random(in: -2.0...(-0.5)); dy = CGFloat.random(in: 0.8...1.8)  // upper-left
-                case 2: dx = CGFloat.random(in: -2.0...(-0.5)); dy = CGFloat.random(in: -0.5...0.5)  // left
-                default: dx = CGFloat.random(in: 0.5...2.0); dy = CGFloat.random(in: -0.5...0.5)     // right
-                }
-            } else if self.currentState == .approve {
-                // Alert scanning — look around in all directions
-                let direction = Int.random(in: 0...5)
-                switch direction {
-                case 0: dx = CGFloat.random(in: 1.5...2.5); dy = CGFloat.random(in: 0.5...1.0)
-                case 1: dx = CGFloat.random(in: -2.5...(-1.5)); dy = CGFloat.random(in: 0.5...1.0)
-                case 2: dy = CGFloat.random(in: 1.0...2.0)
-                case 3: dx = CGFloat.random(in: -1.0...1.0); dy = CGFloat.random(in: -1.0...(-0.5))
-                default: dx = CGFloat.random(in: 1.0...2.0); dy = CGFloat.random(in: 0.5...1.2)
-                }
-            } else {
-                let direction = Int.random(in: 0...3)
-                switch direction {
-                case 0: dx = CGFloat.random(in: 1.5...2.5)
-                case 1: dx = CGFloat.random(in: -2.5...(-1.5))
-                case 2: dy = CGFloat.random(in: 1.0...1.8)
-                case 3: dx = CGFloat.random(in: 1.0...2.0); dy = CGFloat.random(in: 0.5...1.2)
-                default: break
-                }
-            }
+            let (dx, dy) = self.glanceTarget(for: self.currentState)
 
             // Phase 1 — Anticipation: eyes move 0.3 gu in OPPOSITE direction (60ms)
             let antiDx = -dx * 0.15  // ~0.3 gu for a 2.0 gu glance
@@ -455,6 +442,120 @@ final class LifeAnimator {
         glanceTimer?.cancel()
         glanceTimer = timer
         timer.resume()
+    }
+
+    private func glanceTarget(for state: AvatarState) -> (CGFloat, CGFloat) {
+        switch state {
+        case .thinking:
+            // Reflective gaze — all 4 directions
+            let d = Int.random(in: 0...3)
+            switch d {
+            case 0: return (CGFloat.random(in: 0.5...2.0), CGFloat.random(in: 0.8...1.8))      // upper-right
+            case 1: return (CGFloat.random(in: -2.0...(-0.5)), CGFloat.random(in: 0.8...1.8))   // upper-left
+            case 2: return (CGFloat.random(in: -2.0...(-0.5)), CGFloat.random(in: -0.5...0.5))  // left
+            default: return (CGFloat.random(in: 0.5...2.0), CGFloat.random(in: -0.5...0.5))     // right
+            }
+
+        case .planning:
+            // Contemplative: bias left (orb) + upward gazes
+            let d = Int.random(in: 0...4)
+            switch d {
+            case 0: return (CGFloat.random(in: -2.0...(-1.0)), CGFloat.random(in: -0.3...0.3))  // left (orb)
+            case 1: return (CGFloat.random(in: -1.5...(-0.5)), CGFloat.random(in: 0.5...1.2))   // upper-left
+            case 2: return (CGFloat.random(in: -0.3...0.3), CGFloat.random(in: 1.0...2.0))      // up (contemplating)
+            case 3: return (CGFloat.random(in: 0.5...1.5), CGFloat.random(in: 0.5...1.5))       // upper-right
+            default: return (CGFloat.random(in: -1.0...(-0.3)), CGFloat.random(in: -0.5...0.0)) // down-left (orb area)
+            }
+
+        case .approve:
+            // Alert scanning — 6 directions, nervous energy
+            let d = Int.random(in: 0...5)
+            switch d {
+            case 0: return (CGFloat.random(in: 1.5...2.5), CGFloat.random(in: 0.3...1.0))       // right-up
+            case 1: return (CGFloat.random(in: -2.5...(-1.5)), CGFloat.random(in: 0.3...1.0))    // left-up
+            case 2: return (CGFloat.random(in: -0.3...0.3), CGFloat.random(in: 1.0...2.0))       // up
+            case 3: return (CGFloat.random(in: -1.0...1.0), CGFloat.random(in: -1.0...(-0.5)))   // down
+            case 4: return (CGFloat.random(in: -2.0...(-1.0)), CGFloat.random(in: -0.5...0.5))   // left
+            default: return (CGFloat.random(in: 1.0...2.0), CGFloat.random(in: -0.5...0.5))      // right
+            }
+
+        case .listening:
+            // Mostly centered on user, tiny glances up/down
+            let d = Int.random(in: 0...3)
+            switch d {
+            case 0: return (CGFloat.random(in: -0.3...0.3), CGFloat.random(in: 0.5...1.0))      // slight up
+            case 1: return (CGFloat.random(in: -0.3...0.3), CGFloat.random(in: -0.5...(-0.2)))   // slight down
+            case 2: return (CGFloat.random(in: -0.8...(-0.3)), CGFloat.random(in: -0.2...0.2))   // slight left
+            default: return (CGFloat.random(in: 0.3...0.8), CGFloat.random(in: -0.2...0.2))      // slight right
+            }
+
+        case .working:
+            // Methodical: left-right sweeps like reading code
+            let d = Int.random(in: 0...4)
+            switch d {
+            case 0: return (CGFloat.random(in: -2.0...(-1.0)), CGFloat.random(in: 0.2...0.8))   // upper-left (reading start)
+            case 1: return (CGFloat.random(in: 1.0...2.0), CGFloat.random(in: 0.2...0.8))       // upper-right (reading end)
+            case 2: return (CGFloat.random(in: -1.5...(-0.5)), CGFloat.random(in: -0.5...0.0))   // lower-left
+            case 3: return (CGFloat.random(in: 0.5...1.5), CGFloat.random(in: -0.5...0.0))       // lower-right
+            default: return (CGFloat.random(in: -0.3...0.3), CGFloat.random(in: -0.2...0.2))     // center reset
+            }
+
+        case .responding:
+            // Composing: horizontal sweeps with occasional upward thought
+            let d = Int.random(in: 0...4)
+            switch d {
+            case 0: return (CGFloat.random(in: -1.8...(-0.8)), CGFloat.random(in: -0.2...0.3))   // left (writing)
+            case 1: return (CGFloat.random(in: 0.8...1.8), CGFloat.random(in: -0.2...0.3))       // right (writing)
+            case 2: return (CGFloat.random(in: -0.5...0.5), CGFloat.random(in: 0.8...1.5))       // up (thinking of words)
+            case 3: return (CGFloat.random(in: -0.3...0.3), CGFloat.random(in: -0.3...0.3))      // center
+            default: return (CGFloat.random(in: -1.2...1.2), CGFloat.random(in: -0.1...0.1))     // horizontal sweep
+            }
+
+        case .tool:
+            // Focused on cooking: mostly down-left (pan), occasional glances away
+            let d = Int.random(in: 0...4)
+            switch d {
+            case 0: return (CGFloat.random(in: -1.8...(-1.0)), CGFloat.random(in: -0.8...(-0.2))) // down-left (pan)
+            case 1: return (CGFloat.random(in: -1.5...(-0.5)), CGFloat.random(in: -0.3...0.3))    // left (pan area)
+            case 2: return (CGFloat.random(in: 0.5...1.5), CGFloat.random(in: 0.3...1.0))         // glance up-right
+            case 3: return (CGFloat.random(in: -0.3...0.3), CGFloat.random(in: 0.5...1.2))        // glance up
+            default: return (CGFloat.random(in: -1.2...(-0.3)), CGFloat.random(in: -0.5...0.0))   // down-left area
+            }
+
+        case .error:
+            // Erratic, all directions, wide range
+            let d = Int.random(in: 0...5)
+            switch d {
+            case 0: return (CGFloat.random(in: 1.5...2.5), CGFloat.random(in: 0.5...1.5))        // upper-right
+            case 1: return (CGFloat.random(in: -2.5...(-1.5)), CGFloat.random(in: 0.5...1.5))     // upper-left
+            case 2: return (CGFloat.random(in: -2.0...(-1.0)), CGFloat.random(in: -1.0...(-0.3))) // lower-left
+            case 3: return (CGFloat.random(in: 1.0...2.0), CGFloat.random(in: -1.0...(-0.3)))     // lower-right
+            case 4: return (CGFloat.random(in: -0.5...0.5), CGFloat.random(in: -1.5...(-0.8)))    // down
+            default: return (CGFloat.random(in: -0.5...0.5), CGFloat.random(in: 1.0...1.8))       // up
+            }
+
+        case .success:
+            // Relaxed, gentle looks around — slightly upward bias (happy)
+            let d = Int.random(in: 0...3)
+            switch d {
+            case 0: return (CGFloat.random(in: 0.5...1.5), CGFloat.random(in: 0.3...1.2))        // upper-right
+            case 1: return (CGFloat.random(in: -1.5...(-0.5)), CGFloat.random(in: 0.3...1.2))     // upper-left
+            case 2: return (CGFloat.random(in: -1.0...1.0), CGFloat.random(in: -0.5...0.0))       // slight down
+            default: return (CGFloat.random(in: -0.3...0.3), CGFloat.random(in: 0.5...1.5))       // up (content)
+            }
+
+        default:
+            // Balanced fallback: 6 symmetric directions
+            let d = Int.random(in: 0...5)
+            switch d {
+            case 0: return (CGFloat.random(in: 1.0...2.0), CGFloat.random(in: 0.5...1.2))        // upper-right
+            case 1: return (CGFloat.random(in: -2.0...(-1.0)), CGFloat.random(in: 0.5...1.2))     // upper-left
+            case 2: return (CGFloat.random(in: 1.0...2.0), CGFloat.random(in: -0.8...(-0.3)))     // lower-right
+            case 3: return (CGFloat.random(in: -2.0...(-1.0)), CGFloat.random(in: -0.8...(-0.3))) // lower-left
+            case 4: return (CGFloat.random(in: -0.3...0.3), CGFloat.random(in: 1.0...1.8))        // up
+            default: return (CGFloat.random(in: -0.3...0.3), CGFloat.random(in: -1.0...(-0.5)))   // down
+            }
+        }
     }
 
     // MARK: - Mouth Micro-Expressions

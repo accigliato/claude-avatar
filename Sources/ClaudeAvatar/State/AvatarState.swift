@@ -7,6 +7,7 @@ enum AvatarState: String, CaseIterable {
     case working
     case responding
     case tool       // executing a tool ("let me cook")
+    case planning   // plan mode (wizard with glowing SGA eyes)
     case approve    // awaiting permission approval
     case error
     case success
@@ -21,6 +22,7 @@ enum AvatarState: String, CaseIterable {
         case .working:    return NSColor(red: 1.00, green: 0.706, blue: 0.302, alpha: 1.0)  // #FFB44D warm amber
         case .responding: return NSColor(red: 0.302, green: 1.00, blue: 0.706, alpha: 1.0)  // #4DFFB4 soft mint
         case .tool:       return NSColor(red: 1.00, green: 0.353, blue: 0.176, alpha: 1.0)  // #FF5A2D intense orange
+        case .planning:   return NSColor(red: 0.439, green: 0.239, blue: 0.863, alpha: 1.0) // #703ddc deep purple
         case .approve:    return NSColor(red: 1.00, green: 0.831, blue: 0.302, alpha: 1.0)  // #FFD44D attention yellow
         case .error:      return NSColor(red: 1.00, green: 0.302, blue: 0.416, alpha: 1.0)  // #FF4D6A soft coral
         case .success:    return NSColor(red: 0.478, green: 1.00, blue: 0.302, alpha: 1.0)  // #7AFF4D bright lime
@@ -41,6 +43,7 @@ enum AvatarState: String, CaseIterable {
         case .working:    return 1.0
         case .responding: return 2.0
         case .tool:       return 1.0
+        case .planning:   return 1.8
         case .approve:    return 2.0
         case .error:      return 1.5
         case .success:    return 1.5
@@ -57,6 +60,7 @@ enum AvatarState: String, CaseIterable {
         case .working:    return 0.85
         case .responding: return 0.6
         case .tool:       return 0.85
+        case .planning:   return 0.75
         case .approve:    return 0.75
         case .error:      return 0.6
         case .success:    return 0.9
@@ -82,6 +86,7 @@ enum AvatarState: String, CaseIterable {
         case .working:    return 2.5
         case .responding: return 1.5
         case .tool:       return 2.8
+        case .planning:   return 0.6
         case .approve:    return 1.5
         case .error:      return 3.0
         case .success:    return 2.0
@@ -98,6 +103,7 @@ enum AvatarState: String, CaseIterable {
         case .working:    return 3.5
         case .responding: return 3.0
         case .tool:       return 3.5
+        case .planning:   return 1.0
         case .approve:    return 2.0
         case .error:      return 1.0
         case .success:    return 4.0
@@ -115,6 +121,7 @@ enum AvatarState: String, CaseIterable {
         case .working:    return 18
         case .responding: return 12
         case .tool:       return 15
+        case .planning:   return 8
         case .approve:    return 6
         case .error:      return 5
         case .success:    return 15
@@ -132,6 +139,7 @@ enum AvatarState: String, CaseIterable {
         case .working:    return 4.0
         case .responding: return 6.0
         case .tool:       return 5.0
+        case .planning:   return 12.0
         case .approve:    return 3.0
         case .error:      return 2.0
         case .success:    return 4.0
