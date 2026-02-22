@@ -11,6 +11,8 @@ case "$EVENT" in
     pgrep -x ClaudeAvatar || "${CLAUDE_AVATAR_PATH:-$HOME/.local/bin/ClaudeAvatar}" &
     ;;
   UserPromptSubmit)
+    # Also ensure app is running (may have auto-quit after long idle)
+    pgrep -x ClaudeAvatar || "${CLAUDE_AVATAR_PATH:-$HOME/.local/bin/ClaudeAvatar}" &
     if [ "$PERMISSION_MODE" = "plan" ]; then
       STATE="planning"
     else
@@ -41,7 +43,7 @@ d=json.load(sys.stdin)
 print(d.get('notification',{}).get('type','') or d.get('notification_type',''))
 " 2>/dev/null)
     if [ "$TYPE" = "idle_prompt" ]; then
-      STATE="listening"
+      STATE="idle"
     elif [ "$TYPE" = "permission_prompt" ]; then
       STATE="approve"
     else

@@ -43,11 +43,11 @@ final class WizardLayer: CALayer {
     private var particleStates: [ParticleState] = []
     private let sgaFontName = "SGA Font"
     private let particleColors: [NSColor] = [
-        NSColor(red: 0.439, green: 0.239, blue: 0.863, alpha: 1.0), // #703ddc purple
-        NSColor(red: 0.314, green: 0.302, blue: 1.00, alpha: 1.0),  // #504dff blue
-        NSColor(red: 0.302, green: 0.659, blue: 1.00, alpha: 1.0),  // #4da8ff cyan
-        NSColor(red: 0.527, green: 0.302, blue: 1.00, alpha: 1.0),  // #864dff light purple
         NSColor(red: 0.302, green: 0.878, blue: 1.00, alpha: 1.0),  // #4de0ff bright cyan
+        NSColor(red: 0.302, green: 0.659, blue: 1.00, alpha: 1.0),  // #4da8ff sky blue
+        NSColor(red: 0.102, green: 0.239, blue: 0.651, alpha: 1.0), // #1a3da6 dark blue
+        NSColor(red: 0.200, green: 0.800, blue: 0.600, alpha: 1.0), // #33cc99 sea green
+        NSColor(red: 0.302, green: 0.920, blue: 0.780, alpha: 1.0), // #4debc7 mint green
     ]
 
     // Orb color cycling
@@ -435,7 +435,7 @@ final class WizardLayer: CALayer {
 
         // Anchor: widest bar top at ~34.4% above body bottom (+1px)
         // This centers the mouth hole on the actual mouth (at ~42% body height)
-        let anchorY = by + bh * 0.33 + 1
+        let anchorY = by + bh * 0.33 + 6
 
         let path = CGMutablePath()
         for rect in beardRects {
@@ -508,7 +508,7 @@ final class WizardLayer: CALayer {
         cachedOrbCY = orbCY
         cachedOrbSize = orbOuterSize
 
-        // Color cycling: purple → blue → cyan
+        // Color cycling: light cyan → blue → dark blue
         let phase = orbColorPhase
         let outerColor = cycleColor(phase: phase)
         let midColor = cycleColor(phase: phase + 0.33)
@@ -549,12 +549,15 @@ final class WizardLayer: CALayer {
                 s.spawnDelay -= dt
                 if s.spawnDelay <= 0 {
                     s.active = true
-                    // Spawn near orb
-                    s.x = cachedOrbCX + CGFloat.random(in: -cachedOrbSize * 0.3...cachedOrbSize * 0.3)
-                    s.y = cachedOrbCY + CGFloat.random(in: -cachedOrbSize * 0.3...cachedOrbSize * 0.3)
-                    // Float outward/upward
-                    s.velocityX = CGFloat.random(in: -30...30)
-                    s.velocityY = CGFloat.random(in: 20...50)
+                    // Spawn on the circumference of the orb
+                    let angle = CGFloat.random(in: 0...(2 * .pi))
+                    let radius = cachedOrbSize * 0.55
+                    s.x = cachedOrbCX + cos(angle) * radius
+                    s.y = cachedOrbCY + sin(angle) * radius
+                    // Float outward from spawn point
+                    let speed = CGFloat.random(in: 25...45)
+                    s.velocityX = cos(angle) * speed + CGFloat.random(in: -8...8)
+                    s.velocityY = sin(angle) * speed + CGFloat.random(in: 5...15)
                     s.character = randomSGACharacter()
                     s.color = particleColors.randomElement() ?? .white
                     s.age = 0
@@ -645,31 +648,33 @@ final class WizardLayer: CALayer {
         return path
     }
 
-    /// Cycle through purple → blue → cyan
+    /// Cycle through cyan → blue → dark blue → teal → sea green → mint → cyan
+    private static let orbStops: [(r: CGFloat, g: CGFloat, b: CGFloat)] = [
+        (0.302, 0.882, 1.000), // #4DE1FF bright cyan
+        (0.302, 0.659, 1.000), // #4DA8FF sky blue
+        (0.102, 0.239, 0.651), // #1A3DA6 dark blue
+        (0.180, 0.500, 0.720), // #2E80B8 teal blue
+        (0.200, 0.800, 0.600), // #33CC99 sea green
+        (0.302, 0.920, 0.780), // #4DEBC7 mint green
+    ]
+
     private func cycleColor(phase: CGFloat) -> CGColor {
+        let stops = Self.orbStops
+        let count = CGFloat(stops.count)
         let t = phase.truncatingRemainder(dividingBy: 1.0)
-        let r: CGFloat
-        let g: CGFloat
-        let b: CGFloat
+        let scaled = t * count
+        let idx = Int(scaled) % stops.count
+        let next = (idx + 1) % stops.count
+        let p = scaled - floor(scaled)
 
-        if t < 0.33 {
-            let p = t / 0.33
-            r = 0.439 * (1 - p) + 0.302 * p
-            g = 0.239 * (1 - p) + 0.302 * p
-            b = 0.863 * (1 - p) + 1.0 * p
-        } else if t < 0.66 {
-            let p = (t - 0.33) / 0.33
-            r = 0.302 * (1 - p) + 0.302 * p
-            g = 0.302 * (1 - p) + 0.878 * p
-            b = 1.0
-        } else {
-            let p = (t - 0.66) / 0.34
-            r = 0.302 * (1 - p) + 0.439 * p
-            g = 0.878 * (1 - p) + 0.239 * p
-            b = 1.0 * (1 - p) + 0.863 * p
-        }
-
-        return NSColor(red: r, green: g, blue: b, alpha: 1.0).cgColor
+        let a = stops[idx]
+        let b = stops[next]
+        return NSColor(
+            red:   a.r * (1 - p) + b.r * p,
+            green: a.g * (1 - p) + b.g * p,
+            blue:  a.b * (1 - p) + b.b * p,
+            alpha: 1.0
+        ).cgColor
     }
 
     private func randomSGACharacter() -> Character {

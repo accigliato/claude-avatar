@@ -7,6 +7,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var orbView: OrbView!
     private var dragView: AvatarDragView!
     private var stateWatcher: StateFileWatcher!
+    private var autoQuitTimer: Timer?
+    private static let autoQuitDelay: TimeInterval = 300 // 5 minutes
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Register SGA font from bundled path or fallback to Resources dir
@@ -52,21 +54,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stateWatcher = StateFileWatcher()
         stateWatcher.start { [weak self] state in
             DispatchQueue.main.async {
-                if state == .idle || state == .listening {
-                    // If window is hidden (after goodbye), show it again
-                    if self?.window.isVisible == false {
-                        self?.window.orderFront(nil)
-                        self?.orbView.transitionTo(.idle)
-                        // Small delay then transition to the requested state
+                guard let self else { return }
+
+                // Any non-goodbye state cancels auto-quit and revives the window
+                if state != .goodbye {
+                    self.cancelAutoQuit()
+
+                    if !self.window.isVisible {
+                        self.window.orderFront(nil)
+                        self.orbView.transitionTo(.idle)
                         if state != .idle {
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                self?.orbView.transitionTo(state)
+                                self.orbView.transitionTo(state)
                             }
                         }
                         return
                     }
                 }
-                self?.orbView.transitionTo(state)
+
+                self.orbView.transitionTo(state)
             }
         }
     }
@@ -76,13 +82,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func handleShouldHide() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
-            NSApplication.shared.terminate(nil)
+        // Hide window instead of terminating — allows revival on next session/clear
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) { [weak self] in
+            self?.window.orderOut(nil)
+            self?.scheduleAutoQuit()
         }
     }
 
     @objc private func handleShouldShow() {
+        cancelAutoQuit()
         window.orderFront(nil)
+    }
+
+    private func scheduleAutoQuit() {
+        autoQuitTimer?.invalidate()
+        autoQuitTimer = Timer.scheduledTimer(withTimeInterval: Self.autoQuitDelay, repeats: false) { _ in
+            NSApplication.shared.terminate(nil)
+        }
+    }
+
+    private func cancelAutoQuit() {
+        autoQuitTimer?.invalidate()
+        autoQuitTimer = nil
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
