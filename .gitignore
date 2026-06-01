@@ -16,3 +16,5 @@ DerivedData/
 *credential*
 *.keychain
 *.keychain-db
+
+.DS_Store
