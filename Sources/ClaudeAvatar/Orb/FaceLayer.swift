@@ -7,7 +7,11 @@ final class FaceLayer: CALayer {
     private let rightEye = CAShapeLayer()
     private let leftEyeBorder = CAShapeLayer()
     private let rightEyeBorder = CAShapeLayer()
+    private let leftBag = CAShapeLayer()
+    private let rightBag = CAShapeLayer()
     private let mouth = CAShapeLayer()
+
+    private var bagThickness: CGFloat = 0
 
     // Planning SGA eye overlay
     private let leftEyeSGA = CATextLayer()
@@ -57,6 +61,13 @@ final class FaceLayer: CALayer {
             border.strokeColor = borderColor
             border.lineWidth = 10.0  // 5px visible externally (half hidden by fill)
             addSublayer(border)
+        }
+        // Eye bags (between borders and eyes)
+        let bagColor = NSColor(red: 0.25, green: 0.10, blue: 0.22, alpha: 0.65).cgColor
+        for bag in [leftBag, rightBag] {
+            bag.fillColor = bagColor
+            bag.strokeColor = nil
+            addSublayer(bag)
         }
         for eye in [leftEye, rightEye] {
             eye.fillColor = featureColor
@@ -168,6 +179,8 @@ final class FaceLayer: CALayer {
             rightEyeBorder.path = eyeP.right
             mouth.path = mouthP
         }
+
+        updateBagPaths(animated: animated, duration: duration)
     }
 
     func applyMouthReaction(openness: CGFloat, animated: Bool) {
@@ -402,6 +415,84 @@ final class FaceLayer: CALayer {
         }
     }
 
+    // MARK: - Eye Bags (fatigue)
+
+    func setBagThickness(_ thickness: CGFloat) {
+        bagThickness = thickness
+        updateBagPaths(animated: true, duration: 1.0)
+    }
+
+    private struct EyeBottomInfo {
+        let gx: CGFloat  // grid x of eye left edge
+        let gy: CGFloat  // grid y of eye bottom edge
+        let gw: CGFloat  // grid width
+    }
+
+    private func eyeBottomInfo() -> (left: EyeBottomInfo, right: EyeBottomInfo) {
+        let ox = eyeOffsetX
+        let oy = eyeOffsetY
+
+        switch currentState {
+        case .idle:
+            return (EyeBottomInfo(gx: leftEyeBaseX + ox, gy: eyeBaseY + oy, gw: 2.5),
+                    EyeBottomInfo(gx: rightEyeBaseX + ox, gy: eyeBaseY + oy, gw: 2.5))
+        case .listening:
+            return (EyeBottomInfo(gx: 3.51 + ox, gy: 8.5 + oy, gw: 3.0),
+                    EyeBottomInfo(gx: 9.49 + ox, gy: 8.5 + oy, gw: 3.0))
+        case .thinking, .planning:
+            return (EyeBottomInfo(gx: 4.51 + ox, gy: 10.5 + oy, gw: 2.5),
+                    EyeBottomInfo(gx: 10.99 + ox, gy: 10.5 + oy, gw: 2.5))
+        case .working:
+            return (EyeBottomInfo(gx: leftEyeBaseX + ox, gy: 9.5 + oy, gw: 2.5),
+                    EyeBottomInfo(gx: rightEyeBaseX + ox, gy: 9.5 + oy, gw: 2.5))
+        case .responding:
+            let rdx: CGFloat = -0.3
+            return (EyeBottomInfo(gx: leftEyeBaseX + ox + rdx, gy: eyeBaseY + oy, gw: 2.5),
+                    EyeBottomInfo(gx: rightEyeBaseX + ox + rdx, gy: eyeBaseY + oy, gw: 2.5))
+        case .tool:
+            return (EyeBottomInfo(gx: 4.01 + ox, gy: 9.5 + oy, gw: 2.5),
+                    EyeBottomInfo(gx: 10.49 + ox, gy: 9.5 + oy, gw: 2.5))
+        case .approve:
+            return (EyeBottomInfo(gx: 3.01 + ox, gy: 8.5 + oy, gw: 3.0),
+                    EyeBottomInfo(gx: 9.99 + ox, gy: 8.5 + oy, gw: 3.0))
+        case .error:
+            return (EyeBottomInfo(gx: 3.56 + ox, gy: 9.05 + oy, gw: 2.4),
+                    EyeBottomInfo(gx: 10.04 + ox, gy: 9.05 + oy, gw: 2.4))
+        case .success:
+            return (EyeBottomInfo(gx: 3.56 + ox, gy: 9.2 + oy, gw: 3.5),
+                    EyeBottomInfo(gx: 10.04 + ox, gy: 9.2 + oy, gw: 3.5))
+        case .goodbye, .sleep:
+            return (EyeBottomInfo(gx: leftEyeBaseX + ox, gy: 10 + oy, gw: 2.5),
+                    EyeBottomInfo(gx: rightEyeBaseX + ox, gy: 10 + oy, gw: 2.5))
+        }
+    }
+
+    private func updateBagPaths(animated: Bool, duration: CFTimeInterval = 0.3) {
+        guard bagThickness > 0 else { return }
+
+        let p = px
+        let xo = xOff
+        let info = eyeBottomInfo()
+
+        let lx = xo + info.left.gx * p - 1
+        let ly = info.left.gy * p - 4 - bagThickness
+        let lw = info.left.gw * p + 2
+        let leftPath = CGPath(rect: CGRect(x: lx, y: ly, width: lw, height: bagThickness), transform: nil)
+
+        let rx = xo + info.right.gx * p - 1
+        let ry = info.right.gy * p - 4 - bagThickness
+        let rw = info.right.gw * p + 2
+        let rightPath = CGPath(rect: CGRect(x: rx, y: ry, width: rw, height: bagThickness), transform: nil)
+
+        if animated {
+            animatePath(layer: leftBag, to: leftPath, duration: duration)
+            animatePath(layer: rightBag, to: rightPath, duration: duration)
+        } else {
+            leftBag.path = leftPath
+            rightBag.path = rightPath
+        }
+    }
+
     // MARK: - Planning SGA Glitch
 
     private func startSGAGlitch() {
@@ -514,6 +605,7 @@ final class FaceLayer: CALayer {
             mouth.path = mouthP
         }
 
+        updateBagPaths(animated: animated, duration: 0.3)
     }
 
     private func animatePath(layer: CAShapeLayer, to path: CGPath, duration: CFTimeInterval = 0.3, easing: CAMediaTimingFunctionName = .easeInEaseOut) {

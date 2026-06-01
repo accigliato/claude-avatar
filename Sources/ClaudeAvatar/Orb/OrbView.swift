@@ -22,6 +22,19 @@ final class OrbView: NSView {
     private var exclamationBouncePhase: CGFloat = 0
     private var exclamationTimer: Timer?
 
+    // Speaker/mute icon (pixel-art, shown on hover)
+    private let speakerIconLayer = CALayer()
+    private let speakerBodyShape = CAShapeLayer()
+    private let speakerStatusShape = CAShapeLayer()
+
+    var isMuted: Bool {
+        get { UserDefaults.standard.bool(forKey: "avatarMuted") }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "avatarMuted")
+            buildSpeakerPaths()
+        }
+    }
+
     private lazy var approveSound: NSSound? = {
         let execURL = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent()
         let candidates = [
@@ -37,6 +50,7 @@ final class OrbView: NSView {
     }()
 
     private var currentState: AvatarState = .idle
+    private let sessionStartDate = Date()
     private var sleepTimer: DispatchSourceTimer?
     private var successTimer: DispatchSourceTimer?
     private var stateTimeoutTimer: DispatchSourceTimer?
@@ -104,6 +118,14 @@ final class OrbView: NSView {
         wizardLayer.beardLayer.removeFromSuperlayer()
         avatarContainer.addSublayer(wizardLayer.beardLayer)
 
+        // Speaker icon (topmost sublayer, shown on hover)
+        speakerIconLayer.opacity = 0
+        speakerBodyShape.strokeColor = nil
+        speakerStatusShape.strokeColor = nil
+        speakerIconLayer.addSublayer(speakerBodyShape)
+        speakerIconLayer.addSublayer(speakerStatusShape)
+        avatarContainer.addSublayer(speakerIconLayer)
+
         // Set initial expression
         layoutLayers()
         faceLayer.setExpression(.idle, animated: false)
@@ -133,6 +155,13 @@ final class OrbView: NSView {
 
         // Start sleep timer
         resetSleepTimer()
+
+        // Fatigue timer: update eye bags every 30s
+        let fatigueTimer = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
+            self?.updateFatigue()
+        }
+        RunLoop.main.add(fatigueTimer, forMode: .common)
+        updateFatigue()
     }
 
     override func layout() {
@@ -180,6 +209,9 @@ final class OrbView: NSView {
 
         // Face: same as body
         faceLayer.frame = bodyLayer.frame
+
+        // Speaker icon: bottom-right of body
+        layoutSpeakerIcon()
     }
 
     private func updateBasePositions() {
@@ -250,8 +282,10 @@ final class OrbView: NSView {
 
         // Exclamation mark + sound: show on approve, hide otherwise
         if state == .approve {
-            approveSound?.stop()
-            approveSound?.play()
+            if !isMuted {
+                approveSound?.stop()
+                approveSound?.play()
+            }
             showExclamation()
         } else if exclamationVisible {
             hideExclamation()
@@ -456,6 +490,93 @@ final class OrbView: NSView {
         } else {
             resetSleepTimer()
         }
+    }
+
+    // MARK: - Speaker Icon
+
+    private func layoutSpeakerIcon() {
+        let iconW: CGFloat = 18
+        let iconH: CGFloat = 14
+        let x = bodyLayer.frame.maxX - iconW - 2
+        let y = bodyLayer.frame.minY + 2
+        speakerIconLayer.frame = CGRect(x: x, y: y, width: iconW, height: iconH)
+        buildSpeakerPaths()
+    }
+
+    private func buildSpeakerPaths() {
+        let px: CGFloat = 2.0
+        let ox: CGFloat = 1  // offset for centering
+        let oy: CGFloat = 1
+
+        // Speaker body (pixel-art, facing right)
+        let body = CGMutablePath()
+        // Driver back plate: cols 0-1, rows 2-3
+        body.addRect(CGRect(x: ox, y: oy + 2 * px, width: 2 * px, height: 2 * px))
+        // Cone mid: col 2, rows 1-4
+        body.addRect(CGRect(x: ox + 2 * px, y: oy + 1 * px, width: px, height: 4 * px))
+        // Cone wide: col 3, rows 0-5
+        body.addRect(CGRect(x: ox + 3 * px, y: oy, width: px, height: 6 * px))
+        speakerBodyShape.path = body
+        speakerBodyShape.fillColor = NSColor.white.cgColor
+
+        // Status indicator: waves (unmuted) or X (muted)
+        let status = CGMutablePath()
+        if isMuted {
+            // Red pixel-art X
+            status.addRect(CGRect(x: ox + 5 * px, y: oy + 4 * px, width: px, height: px))
+            status.addRect(CGRect(x: ox + 6 * px, y: oy + 3 * px, width: px, height: px))
+            status.addRect(CGRect(x: ox + 7 * px, y: oy + 2 * px, width: px, height: px))
+            status.addRect(CGRect(x: ox + 5 * px, y: oy + 2 * px, width: px, height: px))
+            status.addRect(CGRect(x: ox + 7 * px, y: oy + 4 * px, width: px, height: px))
+            speakerStatusShape.fillColor = NSColor(red: 1, green: 0.25, blue: 0.25, alpha: 1).cgColor
+        } else {
+            // Two vertical bars as sound waves
+            status.addRect(CGRect(x: ox + 5 * px, y: oy + 2 * px, width: px, height: 2 * px))
+            status.addRect(CGRect(x: ox + 7 * px, y: oy + 1 * px, width: px, height: 4 * px))
+            speakerStatusShape.fillColor = NSColor.white.cgColor
+        }
+        speakerStatusShape.path = status
+    }
+
+    /// Speaker icon frame in avatarContainer coords (with hit margin)
+    var speakerIconHitRect: NSRect {
+        speakerIconLayer.frame.insetBy(dx: -6, dy: -6)
+    }
+
+    var isSpeakerIconVisible: Bool {
+        speakerIconLayer.opacity > 0.5
+    }
+
+    func showSpeakerIcon(animated: Bool = true) {
+        guard speakerIconLayer.opacity < 0.5 else { return }
+        let anim = CABasicAnimation(keyPath: "opacity")
+        anim.fromValue = speakerIconLayer.opacity
+        anim.toValue = 1.0
+        anim.duration = animated ? 0.2 : 0.01
+        speakerIconLayer.add(anim, forKey: "speakerFade")
+        speakerIconLayer.opacity = 1.0
+    }
+
+    func hideSpeakerIcon(animated: Bool = true) {
+        guard speakerIconLayer.opacity > 0.5 else { return }
+        let anim = CABasicAnimation(keyPath: "opacity")
+        anim.fromValue = speakerIconLayer.opacity
+        anim.toValue = 0.0
+        anim.duration = animated ? 0.3 : 0.01
+        speakerIconLayer.add(anim, forKey: "speakerFade")
+        speakerIconLayer.opacity = 0.0
+    }
+
+    func toggleMute() {
+        isMuted = !isMuted
+    }
+
+    // MARK: - Fatigue (Eye Bags)
+
+    private func updateFatigue() {
+        let elapsed = Date().timeIntervalSince(sessionStartDate)
+        let thickness = min(8.0, 1.0 + 7.0 * log(1.0 + elapsed / 1200.0) / log(10.0))
+        faceLayer.setBagThickness(thickness)
     }
 
     // MARK: - Body Color

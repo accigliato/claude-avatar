@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Create drag overlay (above orb view, handles mouse only in body hitbox)
         dragView = AvatarDragView(frame: NSRect(origin: .zero, size: window.contentView!.bounds.size))
         dragView.autoresizingMask = [.width, .height]
+        dragView.orbView = orbView
         window.contentView?.addSubview(dragView)
         updateDragHitbox()
 
@@ -42,6 +43,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self,
             selector: #selector(handleShouldShow),
             name: .avatarShouldShow,
+            object: nil
+        )
+
+        // Keep the avatar reachable when monitors are connected/disconnected
+        // or screen resolution changes.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleScreenChange),
+            name: NSApplication.didChangeScreenParametersNotification,
             object: nil
         )
 
@@ -92,6 +102,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func handleShouldShow() {
         cancelAutoQuit()
         window.orderFront(nil)
+    }
+
+    @objc private func handleScreenChange() {
+        // Screens settle a beat after the notification fires; re-check then.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            self?.window.ensureVisible()
+        }
     }
 
     private func scheduleAutoQuit() {
